@@ -125,6 +125,39 @@ def main():
         rv_damp.append(q(gg / (1 + gg), 30))
     rv_exp = [q(10 ** (-3.0 * (i / 1024)), 30) for i in range(1025)]             # 10^(-3x), x 0..1 (Q10)
 
+    # ---- step 3.2: modulation, drive, glide, volume, delay (Engine.h, Maps.h, Fx.h)
+    BLK = 16                                                                       # the control block, frames
+    exp2f = [q(2 ** (i / 1024), 30) for i in range(1025)]                         # 2^(i/1024), Q30
+    def env16(c): return 1 - (1 - c) ** BLK
+    env_a16, env_dr16 = [], []
+    for i in range(1025):                                                          # mod envelopes, per 16 frames
+        t = 0.001 * 15000.0 ** (i / 1024)
+        env_a16.append(q(env16(1 - math.exp(-1.466 / (t * FS))), 30))
+        env_dr16.append(q(env16(1 - math.exp(-4.6 / (t * FS))), 30))
+    lfo_inc = [round(0.02 * 1000.0 ** (i / 1024) * BLK / FS * 2 ** 32) for i in range(1025)]   # lfoHz, per block
+    drv_in, drv_out = [], []
+    for i in range(1025):                                                          # DRIVE: into and out of the ladder
+        d = i / 1024
+        gain, trim = 1 + 6 * d, 0.3 + 0.3 * d
+        drv_in.append(q(gain * trim / 0.3, 12))                                   # relative to drive 0
+        drv_out.append(q(0.6 / trim / (1 + 1.6 * d) * 0.5, 14))                   # driveComp x voiceHeadroom
+    panlaw = []
+    for i in range(1025):                                                          # pan -1..1 -> left, right gains
+        pn = -1 + 2 * i / 1024
+        panlaw.append((q(math.cos((pn + 1) * 0.25 * math.pi) * 1.41421, 14), q(math.sin((pn + 1) * 0.25 * math.pi) * 1.41421, 14)))
+    vol = [q(10 ** ((-36 + k / 127 * 42) / 20), 14) for k in range(128)]          # volumeDb, Q14
+    glide = []
+    for k in range(128):                                                           # glide, per block, Q30 (0 = none)
+        v = k / 127
+        gs = 0.0 if v <= 0.001 else 0.002 * 1000 ** v
+        glide.append(0 if gs == 0 else q(1 - math.exp(-BLK / (gs * 0.4 * FS)), 30))
+    dl_time = [round(min(40.0 * 37.5 ** (k / 127) * 0.001 * HF, 32700) * 256) for k in range(128)]   # delayMs, half-rate frames Q8
+    dl_lp = []
+    for k in range(128):                                                           # the delay's feedback tone, Q30 at half rate
+        hz = min(500.0 * 32.0 ** (k / 127), HF * 0.45)
+        gg = math.tan(math.pi * hz / HF)
+        dl_lp.append(q(gg / (1 + gg), 30))
+
     voice_pan = [-0.15, 0.15, -0.45, 0.45, -0.3, 0.3, -0.6, 0.6]       # Engine.h, times spread 0.5
     pan = []
     for p in voice_pan:
@@ -158,6 +191,17 @@ def main():
     arr("ZT_ENV_DR", "int32_t", env_dr)
     arr("ZT_SIN", "int16_t", sin_t)
     arr("RV_RT", "int32_t", rv_rt)
+    arr("ZT_EXP2F", "int32_t", exp2f)
+    arr("ZT_ENV_A16", "int32_t", env_a16)
+    arr("ZT_ENV_DR16", "int32_t", env_dr16)
+    arr("ZT_LFO_INC", "uint32_t", lfo_inc)
+    arr("ZT_DRV_IN", "int32_t", drv_in)
+    arr("ZT_DRV_OUT", "int32_t", drv_out)
+    L.append("static const int16_t ZT_PANLAW[1025][2] = {" + ",".join(f"{{{a},{b}}}" for a, b in panlaw) + "};")
+    arr("ZT_VOL", "int32_t", vol)
+    arr("ZT_GLIDE", "int32_t", glide)
+    arr("DL_TIME", "int32_t", dl_time)
+    arr("DL_LP", "int32_t", dl_lp)
     arr("RV_DAMP", "int32_t", rv_damp)
     arr("RV_EXP", "int32_t", rv_exp)
     L.append("static const int32_t ZT_DET[1025][4] = {")

@@ -61,10 +61,12 @@ jobs:
           echo "41167491bffed4651750719c973d2758adeb9021a5670d02d6a53c85ed80ea7d  cfg/eq_cfg_hw.bin" >> /tmp/sums
           sha256sum -c /tmp/sums
 
-      - name: Tables
+      - name: Tables, and the presets converted from the plugin's
         run: |
           python3 tools/gen_tables.py
           git diff --exit-code firmware/gen/zen_tables.h
+          ZEN_SRC=zenthesizer sh tools/make_presets.sh
+          git diff --exit-code firmware/gen/zen_presets.h
 
       - name: Build the FM-1 package
         run: |

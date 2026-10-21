@@ -7,9 +7,10 @@
  *
  * Number formats:  Q15 = 1.0 is 32768 (the audio)   Q24 = 1.0 is 2^24 (inside the filter, oscillator phase)
  *                  Q30 = 1.0 is 2^30 (coefficients, envelope)   Q10 = a knob position, 0..1024
- * Gain staging is the plugin's, with DRIVE at 0: A goes into the ladder x 0.3 and B x 0.15 (bLevel x 0.5 x
- * inTrim 0.3), it comes out x 2 (driveComp), and each voice sits 6 dB down (voiceHeadroom). The limiter after
- * the voices catches what chords add up to, so nothing reaches the platform's hard clip.
+ * Gain staging is the plugin's: at DRIVE 0, A goes into the ladder x 0.3 and B x 0.15 (bLevel x 0.5 x inTrim
+ * 0.3), it comes out x 2 (driveComp), and each voice sits 6 dB down (voiceHeadroom); DRIVE pushes the input up to
+ * x 14 into the ladder's tanh and takes the output down to match (ZT_DRV_IN, ZT_DRV_OUT). The limiter after the
+ * voices catches what chords add up to, so nothing reaches the platform's hard clip.
  * One difference: the plugin runs a ladder per side; here each voice has one (half the cost), and Engine A's
  * side oscillators are summed to it in the middle instead of spread left and right. */
 #ifndef ZEN_VOICE_H
@@ -21,26 +22,33 @@
 #define ONE30 (1 << 30)
 #define M30(a, b) ((int32_t)(((int64_t)(a) * (b)) >> 30))
 
-/* ---- what the main loop sets (32-bit stores: atomic; the ISR only reads these) */
-static volatile int32_t zp_pos = 461;           /* POSITION, Q10 */
-static volatile int32_t zp_cut = 635;           /* CUTOFF, Q10 */
-static volatile int32_t zp_k = 0;               /* resonance k = res x 3.95, Q24 (zen_set_res) */
-static volatile int32_t zc_att, zc_dec, zc_rel, zc_sus;   /* envelope, Q30 */
+/* ---- what the main loop sets (32-bit stores: atomic; the ISR only reads these). Knobs are Q10 (0..1024). */
+static volatile int32_t zp_pos = 461;           /* B POSITION */
+static volatile int32_t zp_cut = 635;           /* CUTOFF */
+static volatile int32_t zp_res = 307;           /* RESONANCE */
+static volatile int32_t zp_drive = 0;           /* DRIVE */
+static volatile int32_t zp_envamt = 0;          /* ENV AMOUNT, -1024..1024 (ENV 1 to the cutoff, +-0.6) */
+static volatile int32_t zp_ktrack = 516;        /* KEY TRACK */
+static volatile int32_t zc_att, zc_dec, zc_rel, zc_sus;   /* the amp envelope, Q30 per frame */
+static volatile int32_t ze_att[2], ze_dec[2], ze_rel[2], ze_sus[2];   /* ENV 1, ENV 2, Q30 per 16 frames */
 static volatile int32_t zp_awave = 0;           /* 0 saw, 1 square, 2 triangle, 3 sine */
-static volatile int32_t zp_ashape = 0;          /* SHAPE, Q15 */
-static volatile int32_t zp_adet = 205;          /* DETUNE, Q10 */
+static volatile int32_t zp_ashape = 0;          /* SHAPE */
+static volatile int32_t zp_adet = 205;          /* DETUNE */
 static volatile int32_t zp_atune = 0;           /* TUNE, semitones -24..24 */
-static volatile int32_t zp_again = 32768, zp_bgain = 32768;   /* levels, Q15 (from the A-B mix) */
+static volatile int32_t zp_alev = 1024, zp_blev = 1024;   /* A LEVEL, B LEVEL */
 static volatile int32_t zp_btable = 1;          /* 0 AIR, 1 GLASS, 2 VOX, 3 REED */
-static volatile int32_t zp_bwarp = 0;           /* WARP, Q15 */
-
+static volatile int32_t zp_bwarp = 0;           /* WARP */
+static volatile int32_t zp_glide = 0;           /* GLIDE, Q30 per 16 frames (0: none) */
+static volatile int32_t zp_velsens = 516;       /* VEL SENS */
+static volatile int32_t zp_spread = 516;        /* STEREO: the voices' spread */
+static volatile int32_t zm_bend;                /* MIDI pitch bend, semitones Q10 */
 typedef struct {
     /* main loop writes */
-    volatile uint32_t inc;                      /* Engine B's phase step: f * 2^32 / 44100 */
     volatile uint32_t trig;                     /* +1 for every note-on */
     volatile int32_t gate;                      /* 1 held, 0 let go */
-    volatile int32_t vel;                       /* velocity gain, Q15 */
-    volatile int32_t ktrack;                    /* key tracking, added to the cutoff knob (Q10) */
+    volatile int32_t velq;                      /* velocity, Q15 */
+    volatile int32_t press_t;                   /* poly pressure, Q15 */
+    volatile int32_t from;                      /* with GLIDE, a voice starting from silence glides from here (Q20) */
     volatile uint8_t note;
     uint8_t chord;                              /* 0 a key or MIDI note, 1..7 a chord's */
     uint32_t age, tag;
@@ -50,6 +58,11 @@ typedef struct {
     volatile int32_t env;                       /* Q30; the main loop reads it to steal voices */
     volatile uint8_t stage;                     /* 0 idle, 1 attack, 2 decay/sustain, 3 release, 4 fading out (the guard) */
     uint8_t kill;                               /* the CPU guard wants this voice gone: a 4 ms fade */
+    uint8_t es[2];                              /* ENV 1, 2: 0 idle, 1 attack, 2 decay, 3 release */
+    int32_t e[2];                               /* ENV 1, 2, Q30 */
+    int32_t pitch;                              /* where the glide is, semitones Q20 */
+    int32_t press;                              /* pressure, smoothed (15 ms), Q15 */
+    int32_t gl, gr;                             /* the output gains at the end of the last control block, Q15 */
     int32_t s[4];                               /* ladder states, Q24 */
 } zvoice_t;
 
@@ -64,6 +77,19 @@ static uint32_t zinc(int note)                  /* a MIDI note's phase step */
     if (note < 0) note = 0;
     if (note > 131) note = 131;
     return ZINC_C9[note % 12] >> (10 - note / 12);
+}
+static uint32_t zinc_q(int32_t s)               /* a pitch in semitones Q10 -> phase step (<= 0.45 fs) */
+{
+    uint32_t x, i, r, base;
+    int32_t e;
+    if (s < 0) s = 0;
+    if (s >= (130 << 10)) s = 130 << 10;
+    base = zinc(s >> 10);
+    x = ((uint32_t)(s & 1023) * 87381u) >> 10;   /* the fraction of a semitone, in 1/2^20 octaves */
+    i = x >> 10;
+    e = ZT_EXP2F[i] + (int32_t)(((ZT_EXP2F[i + 1u] - ZT_EXP2F[i]) * (int32_t)(x & 1023u)) >> 10);
+    r = (uint32_t)(((uint64_t)base * (uint32_t)e) >> 30);
+    return r > 1932735283u ? 1932735283u : r;
 }
 
 static inline __attribute__((always_inline)) int32_t ztanh(int32_t x)                 /* Voice.h fastTanh: Q24 in, Q24 out, from the table */
@@ -83,6 +109,8 @@ static inline __attribute__((always_inline)) int32_t zsin(uint32_t ph)          
     int32_t f = (int32_t)((ph >> 7) & 0x7FFFu);
     return ZT_SIN[i] + (((ZT_SIN[i + 1] - ZT_SIN[i]) * f) >> 15);
 }
+
+#include "zen_mod.h"
 
 /* PolyBLEP (Voice.h polyBlep): t and dt in Q24 (one cycle = 2^24), invdt = 2^31 / dt; Q15 out */
 static inline __attribute__((always_inline)) int32_t zblep(uint32_t t, uint32_t dt, uint32_t invdt)
@@ -209,14 +237,45 @@ static uint32_t zguard_shed(void)
     return 1;
 }
 
-/* ---- one voice, n frames (n a multiple of ZBLK), added into mixL / mixR (Q15) */
+/* ---- the modulation of the global destinations (LFO rates, effect mixes): from the global sources, and the newest
+ * voice for the per-voice ones (Engine.h controlTick). Once per audio block, before zm_block. */
+static const int16_t ZV_PAN[ZV] = {-154, 154, -461, 461, -307, 307};   /* Engine.h voicePan, Q10 */
+static int32_t zv_src(const zvoice_t *v, uint32_t s, uint32_t sb)    /* a source for one voice, Q15 */
+{
+    int32_t k;
+    switch (s) {
+    case ZS_ENV1: return v->e[0] >> 15;
+    case ZS_ENV2: return v->e[1] >> 15;
+    case ZS_PRESS: return v->press;
+    case ZS_VEL: return v->velq;
+    case ZS_KEY:                                /* (pitch - 60) / 24, -1..1 */
+        k = (((v->pitch >> 10) - (60 << 10)) * 4) / 3;
+        return k > 32768 ? 32768 : k < -32768 ? -32768 : k;
+    default: return zm_gsrc(s, sb);
+    }
+}
+static void zm_global(void)
+{
+    uint32_t v, k, best = 0;
+    const zvoice_t *nv = 0;
+    for (v = 0; v < ZV; v++)
+        if (zv[v].stage && (!nv || zv[v].age - best < 0x80000000u)) { nv = &zv[v]; best = zv[v].age; }
+    for (k = 0; k < ZD_N; k++) zm_g[k] = 0;
+    for (k = 0; k < zm_gn; k++) {
+        int32_t sv = nv ? zv_src(nv, zm_gs[k].src, ZSUB - 1u) : zm_gsrc(zm_gs[k].src, ZSUB - 1u);
+        zm_g[zm_gs[k].dst] += (zm_gs[k].amt * sv) >> 15;
+    }
+}
+
+static int32_t zclamp(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
+
+/* ---- one voice, n frames (n a multiple of ZBLK; ZSUB blocks at most), added into mixL / mixR (Q15) */
 static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
 {
     zvoice_t *v = &zv[vi];
-    uint32_t b, i, ph, pa0, pa1, pa2, inc = v->inc;
-    int32_t env = v->env, vel = v->vel, s0, s1, s2, s3, fb0, fb1, fb2, ablk[ZBLK];
+    uint32_t b, i, ph, pa0, pa1, pa2, j;
+    int32_t env = v->env, s0, s1, s2, s3, fb0, fb1, fb2, ablk[ZBLK], gl = v->gl, gr = v->gr;
     uint8_t stage = v->stage;
-    const int32_t pl = ZT_PAN[vi][0], pr = ZT_PAN[vi][1];
 
     if (v->trig != v->seen) {                   /* a new note: from silence, a fresh start */
         v->seen = v->trig;
@@ -226,28 +285,67 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
             v->ph = zrand;                      /* free-running feel: random start phases */
             for (i = 0; i < 3u; i++) { zrand = zrand * 1664525u + 1013904223u; v->pa[i] = zrand; v->fb[i] = 0; }
             env = 0;
+            v->e[0] = v->e[1] = 0;
+            v->press = 0;
+            gl = gr = 0;
+            v->pitch = zp_glide ? v->from : (int32_t)v->note << 20;
         }
+        if (!zp_glide) v->pitch = (int32_t)v->note << 20;
         stage = 1;
+        v->es[0] = v->es[1] = 1;
         v->kill = 0;
     } else if (v->kill && stage)
         stage = 4;
-    else if (!v->gate && (stage == 1 || stage == 2))
+    else if (!v->gate && (stage == 1 || stage == 2)) {
         stage = 3;
+        if (v->es[0]) v->es[0] = 3;
+        if (v->es[1]) v->es[1] = 3;
+    }
     if (!stage) { v->env = 0; v->kill = 0; return; }
 
     ph = v->ph; pa0 = v->pa[0]; pa1 = v->pa[1]; pa2 = v->pa[2];
     fb0 = v->fb[0]; fb1 = v->fb[1]; fb2 = v->fb[2];
     s0 = v->s[0]; s1 = v->s[1]; s2 = v->s[2]; s3 = v->s[3];
     for (b = 0; b < n; b += ZBLK) {
-        /* control rate: the ladder's coefficients for this cutoff and resonance (Voice.h Ladder) */
-        int32_t c = zp_cut + v->ktrack, k = zp_k, G, G2, G3, G4, omg, c0, c1, c2, c3, inv, comp, ff;
-        int32_t wave = zp_awave, shape = zp_ashape, pw, foldm, foldk, kfm, side, anorm, kA, kB, dq = zp_adet;
-        uint32_t D, posq, f0, lv = 0, ia0, ia1, ia2, dt0, dt1, dt2, iv0, iv1, iv2, ws1, ws2, wk32, tb = (uint32_t)zp_btable & 3u;
-        int32_t warpK = 16384 - ((14746 * zp_bwarp) >> 15);           /* 0.5 - 0.45 warp, Q15 */
+        int32_t mm[ZD_N], c, k, G, G2, G3, G4, omg, c0, c1, c2, c3, inv, comp, ff, res, drive, lev, semis, pan, g;
+        int32_t wave = zp_awave, shape, pw, foldm, foldk, kfm, side, anorm, kA, kB, dq, bwarp, din, glT, grT, dgl, dgr;
+        uint32_t D, posq, f0, lv = 0, inc, ia0, ia1, ia2, dt0, dt1, dt2, iv0, iv1, iv2, ws1, ws2, wk32;
+        uint32_t tb = (uint32_t)zp_btable & 3u, sb = b / ZBLK;
+        int32_t warpK;
         uint64_t effinc;
         const int16_t *t0, *t1;
-        if (c < 0) c = 0;
-        if (c > 1024) c = 1024;
+
+        /* control rate: the mod envelopes, pressure and glide, then the slots (Engine.h renderVoice) */
+        for (j = 0; j < 2u; j++) {
+            int32_t e = v->e[j];
+            if (v->es[j] == 1) {
+                e += M30(1395864371 - e, ze_att[j]);
+                if (e >= ONE30) { e = ONE30; v->es[j] = 2; }
+            } else if (v->es[j] == 2)
+                e += M30(ze_sus[j] - e, ze_dec[j]);
+            else if (v->es[j] == 3) {
+                e += M30(-e, ze_rel[j]) - 1;
+                if (e < 107374) { e = 0; v->es[j] = 0; }
+            }
+            v->e[j] = e;
+        }
+        v->press += ((v->press_t - v->press) * 783) >> 15;
+        if (zp_glide) v->pitch += M30(((int32_t)v->note << 20) - v->pitch, zp_glide);
+        for (j = 0; j < ZD_N; j++) mm[j] = 0;
+        for (j = 0; j < zm_vn; j++)
+            mm[zm_vs[j].dst] += (zm_vs[j].amt * zv_src(v, zm_vs[j].src, sb)) >> 15;   /* Q10 */
+
+        /* the pitches: the glide, the pitch slot (+-12 semitones) and the bend; A adds TUNE and A TUNE (+-24) */
+        semis = (v->pitch >> 10) + mm[ZD_PITCH] * 12 + zm_bend;
+        inc = zinc_q(semis);
+        ia0 = zinc_q(semis + (zp_atune << 10) + mm[ZD_ATUNE] * 24);
+
+        /* the filter: CUTOFF, its slots, ENV 1 x ENV AMOUNT (+-0.6), key tracking (Voice.h Ladder) */
+        c = zp_cut + mm[ZD_CUT] + ((((zp_envamt * 19661) >> 15) * (v->e[0] >> 15)) >> 15)
+          + (((((v->pitch >> 10) - (60 << 10)) * zp_ktrack) >> 10) * 557 >> 16);
+        c = zclamp(c, 0, 1024);
+        res = zclamp(zp_res + mm[ZD_RES], 0, 1024);
+        k = (int32_t)(((int64_t)res * 66270167) >> 10);              /* res x 3.95, Q24 */
         G = ZT_G[c];
         G2 = M30(G, G); G3 = M30(G2, G); G4 = M30(G3, G);
         omg = ONE30 - G;
@@ -255,12 +353,16 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
         D = 32768u + (uint32_t)(((int64_t)k * G4) >> 39);           /* 1 + k G^4, Q15 */
         inv = (int32_t)((0x40000000u / D) << 15);                    /* 1 / (1 + k G^4), Q30 */
         comp = 4096 + (int32_t)((((int64_t)k >> 12) * 2253) >> 12); /* 1 + 0.55 k, Q12 */
+        drive = zclamp(zp_drive + mm[ZD_DRIVE], 0, 1024);
+        din = ZT_DRV_IN[drive];                                      /* into the ladder, Q12 (1 at DRIVE 0) */
 
-        /* Engine B: which two GLASS frames, and how far between them */
-        posq = (uint32_t)zp_pos * (ZT_FRAMES - 1u);                  /* frames, Q10 */
+        /* Engine B: which two frames, and how far between them; WARP */
+        posq = (uint32_t)zclamp(zp_pos + mm[ZD_BPOS], 0, 1024) * (ZT_FRAMES - 1u);   /* frames, Q10 */
         f0 = posq >> 10;
         if (f0 > ZT_FRAMES - 2u) f0 = ZT_FRAMES - 2u;
         ff = (int32_t)((posq - (f0 << 10)) << 5);                    /* crossfade, Q15 */
+        bwarp = zclamp(zp_bwarp + mm[ZD_BWARP], 0, 1024) << 5;       /* Q15 */
+        warpK = 16384 - ((14746 * bwarp) >> 15);                     /* 0.5 - 0.45 warp, Q15 */
         ws1 = 0x40000000u / (uint32_t)warpK;                         /* 0.5 / warpK, Q16 */
         ws2 = 0x40000000u / (uint32_t)(32768 - warpK);               /* 0.5 / (1 - warpK), Q16 */
         wk32 = (uint32_t)warpK << 17;
@@ -269,14 +371,15 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
             lv++;
         t0 = ZT_TAB[tb][f0][lv];
         t1 = ZT_TAB[tb][f0 + 1u][lv];
+        lev = zclamp(zp_blev + mm[ZD_BLEVEL], 0, 1024);
+        kB = (int32_t)(((int64_t)ZT_XGAIN * (lev << 5)) >> 15);      /* B: x 0.15 */
+        kB = (kB * din) >> 12;
 
         /* Engine A: three pitches (centre, and the side pair DETUNE spreads), each <= 0.45 fs */
-        if (dq < 0) dq = 0;
-        if (dq > 1024) dq = 1024;
-        ia0 = zinc(v->note + zp_atune);
+        dq = zclamp(zp_adet + mm[ZD_ADET], 0, 1024);
+        shape = zclamp(zp_ashape + mm[ZD_ASHAPE], 0, 1024) << 5;     /* Q15 */
         ia1 = (uint32_t)(((uint64_t)ia0 * (uint32_t)ZT_DET[dq][0]) >> 30);
         ia2 = (uint32_t)(((uint64_t)ia0 * (uint32_t)ZT_DET[dq][1]) >> 30);
-        if (ia0 > 1932735283u) ia0 = 1932735283u;
         if (ia1 > 1932735283u) ia1 = 1932735283u;
         if (ia2 > 1932735283u) ia2 = 1932735283u;
         dt0 = (ia0 >> 8) | 1u; dt1 = (ia1 >> 8) | 1u; dt2 = (ia2 >> 8) | 1u;
@@ -286,9 +389,10 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
         foldm = 32768 + 3 * shape;                                   /* 1 + 3 shape, Q15 */
         foldk = shape >= 8192 ? 32768 : shape * 4;                   /* min(1, 4 shape), Q15 */
         kfm = (int32_t)(((int64_t)shape * 33373) >> 15);             /* shape x 1.6 / 2 pi, as a phase */
-        kA = (int32_t)(((int64_t)9830 * zp_again) >> 15);            /* A into the ladder: x 0.3 */
+        lev = zclamp(zp_alev + mm[ZD_ALEVEL], 0, 1024);
+        kA = (int32_t)(((int64_t)9830 * (lev << 5)) >> 15);          /* A into the ladder: x 0.3 */
         kA = (int32_t)(((int64_t)kA * anorm) >> 15);
-        kB = (int32_t)(((int64_t)ZT_XGAIN * zp_bgain) >> 15);        /* B: x 0.15 */
+        kA = (kA * din) >> 12;
         side = (side * 19661) >> 15;                                 /* the side pair at 0.6 each, mono */
 
         for (i = 0; i < ZBLK; i++) ablk[i] = 0;
@@ -299,19 +403,30 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
                 zosc_block(wave, &pa2, ia2, dt2, iv2, shape, pw, foldm, foldk, kfm, &fb2, ablk, side);
             } else { pa1 += ia1 * ZBLK; pa2 += ia2 * ZBLK; }
         } else { pa0 += ia0 * ZBLK; pa1 += ia1 * ZBLK; pa2 += ia2 * ZBLK; }
+        kA >>= 4; kB >>= 4;                     /* (so a x kA + w x kB stays in 32 bits at full DRIVE) */
+
+        /* the output: velocity (1 - VEL SENS (1 - vel)), the AMP slot (x 0..2), DRIVE's make-up and the pan,
+         * as two gains (Q15) that glide across the block */
+        g = 32768 - ((zp_velsens * (32768 - v->velq)) >> 10);
+        g = (g * zclamp(1024 + mm[ZD_AMP], 0, 2048)) >> 10;
+        g = (g * ZT_DRV_OUT[drive]) >> 14;
+        pan = zclamp(((ZV_PAN[vi] * zp_spread) >> 10) + mm[ZD_PAN], -1024, 1024);
+        glT = (g * ZT_PANLAW[(pan + 1024) >> 1][0]) >> 14;
+        grT = (g * ZT_PANLAW[(pan + 1024) >> 1][1]) >> 14;
+        dgl = (glT - gl) / (int32_t)ZBLK; dgr = (grT - gr) / (int32_t)ZBLK;
 
         for (i = b; i < b + ZBLK; i++) {
-            uint32_t bph = !zp_bwarp ? ph : ph < wk32 ? (uint32_t)(((uint64_t)ph * ws1) >> 16)
+            uint32_t bph = !bwarp ? ph : ph < wk32 ? (uint32_t)(((uint64_t)ph * ws1) >> 16)
                         : 0x80000000u + (uint32_t)(((uint64_t)(ph - wk32) * ws2) >> 16);
             uint32_t ix = bph >> 23, ix2 = (ix + 1u) & (ZT_SIZE - 1u);
-            int32_t fr = (int32_t)((bph >> 8) & 0x7FFFu), a0, a1, w = 0, a = ablk[i - b], x, sig, y4, u, vv, y, o;
+            int32_t fr = (int32_t)((bph >> 8) & 0x7FFFu), a0, a1, w = 0, a = ablk[i - b], x, sig, y4, u, vv, y, el;
             if (kB) {
                 a0 = t0[ix] + (((t0[ix2] - t0[ix]) * fr) >> 15);
                 a1 = t1[ix] + (((t1[ix2] - t1[ix]) * fr) >> 15);
                 w = a0 + (((a1 - a0) * ff) >> 15);                 /* Q15 */
             }
             ph += inc;
-            x = (a * kA + w * kB) >> 6;                             /* Q15 -> Q24, with the gains */
+            x = (a * kA + w * kB) >> 2;                             /* Q15 -> Q24, with the gains */
 
             /* the ladder: zero-delay feedback, tanh on the input (Zavalishin, as the plugin) */
             sig = (int32_t)(((int64_t)c0 * s0 + (int64_t)c1 * s1 + (int64_t)c2 * s2 + (int64_t)c3 * s3) >> 30);
@@ -334,32 +449,32 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
                 if (env < 107374) { env = 0; stage = 0; }           /* 1e-4 */
             }
 
-            /* x2 driveComp x 0.5 headroom = 1: the envelope, velocity and the voice's place make two gains (Q15),
-             * then Q24 x Q15 -> Q15 */
-            o = ((env >> 15) * vel) >> 15;
-            mixL[i] += (int32_t)(((int64_t)y * ((o * pl) >> 14)) >> 24);
-            mixR[i] += (int32_t)(((int64_t)y * ((o * pr) >> 14)) >> 24);
+            /* the envelope (Q14) x the gains (Q15) -> Q15; then Q24 x Q15 -> Q15 */
+            gl += dgl; gr += dgr;
+            el = env >> 16;
+            mixL[i] += (int32_t)(((int64_t)y * ((el * gl) >> 14)) >> 24);
+            mixR[i] += (int32_t)(((int64_t)y * ((el * gr) >> 14)) >> 24);
         }
+        gl = glT; gr = grT;
         if (!stage) break;
     }
     v->ph = ph; v->pa[0] = pa0; v->pa[1] = pa1; v->pa[2] = pa2;
     v->fb[0] = fb0; v->fb[1] = fb1; v->fb[2] = fb2;
     v->s[0] = s0; v->s[1] = s1; v->s[2] = s2; v->s[3] = s3;
     v->env = env;
+    v->gl = gl; v->gr = gr;
     v->stage = stage;
 }
 
-/* ---- settings from the main loop */
-static void zen_set_res(int32_t res_q10) { zp_k = (int32_t)(((int64_t)res_q10 * 66270167) >> 10); }  /* x 3.95 in Q24 */
-static void zen_set_env(int32_t a, int32_t d, int32_t s, int32_t r)                           /* knobs, Q10 */
+/* ---- settings from the main loop (knobs Q10) */
+static void zen_set_env(int32_t a, int32_t d, int32_t s, int32_t r)
 {
     zc_att = ZT_ENV_A[a]; zc_dec = ZT_ENV_DR[d]; zc_rel = ZT_ENV_DR[r];
     zc_sus = s << 20;
 }
-static void zen_set_mix(int32_t m_q10)          /* A-B: 0 all A, the middle both full, 1024 all B */
+static void zen_set_modenv(uint32_t j, int32_t a, int32_t d, int32_t s, int32_t r)   /* ENV 1 (j 0), ENV 2 (j 1) */
 {
-    int32_t a = (1024 - m_q10) * 64, bb = m_q10 * 64;
-    zp_again = a > 32768 ? 32768 : a;
-    zp_bgain = bb > 32768 ? 32768 : bb;
+    ze_att[j] = ZT_ENV_A16[a]; ze_dec[j] = ZT_ENV_DR16[d]; ze_rel[j] = ZT_ENV_DR16[r];
+    ze_sus[j] = s << 20;
 }
 #endif

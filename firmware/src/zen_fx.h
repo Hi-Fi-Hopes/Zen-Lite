@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The space around the voices, after Zenthesizer's Fx.h: chorus, then the shimmer reverb, then a tone setting
- * for the FM-1's speaker. (The plugin's ping-pong delay comes later.)
+/* The space around the voices, after Zenthesizer's Fx.h: chorus, the ping-pong delay, the shimmer reverb, then a
+ * tone setting for the FM-1's speaker.
  *   Chorus  two modulated delay taps, a quarter cycle apart left and right, 0.08..3.2 Hz.
+ *   Delay   the plugin's ping-pong: the input into the left line, each line feeding the other through a tone
+ *           low-pass and a soft clip, 40 ms .. 1.48 s, a touch of tape wow. At half the sample rate, in 16 bits.
  *   Reverb  the plugin's: eight delay lines through a Hadamard matrix, input diffusion, damping, slow
  *           modulation, and an octave-up shimmer fed back into it. Here it runs at half the sample rate
  *           (22.05 kHz): half the CPU and memory, and it loses only what its damping takes away anyway.
@@ -19,6 +21,13 @@
 /* ---- what the main loop sets (from the knobs, 0..127) */
 static volatile int32_t zf_chorus = 0, zf_depth = 64, zf_reverb = 0, zf_decay = 64, zf_shimmer = 0;
 static volatile int32_t zf_size = 76, zf_damp = 64, zf_tone = 0;
+static volatile int32_t zf_dtime = 57, zf_dfb = 44, zf_dtone = 64, zf_delay = 0;
+static int32_t zf_cmod, zf_dmod, zf_rmod;       /* the mixes' modulation (the slots' CHORUS, DELAY, REVERB), Q15 */
+static int32_t zf_mix(int32_t knob, int32_t mod)   /* a knob (0..127) and its modulation -> a mix, Q15 */
+{
+    int32_t m = knob * 258 + mod;
+    return m < 0 ? 0 : m > 32767 ? 32767 : m;
+}
 
 /* ---- chorus (Fx.h Chorus) */
 #define CH_LEN 2048u                            /* > 0.03 s, a power of two */
@@ -36,7 +45,7 @@ static int32_t ch_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), l
 
 static void chorus(int32_t *L, int32_t *R, uint32_t n)
 {
-    int32_t mix = zf_chorus * 258, prev = ch_mix_prev;        /* Q15 */
+    int32_t mix = zf_mix(zf_chorus, zf_cmod), prev = ch_mix_prev;   /* Q15 */
     int32_t base = 79027, swing = 16934 + zf_depth * 445;     /* 0.007 fs and (0.0015 + 0.005 depth) fs, Q8 frames */
     uint32_t i;
     if (!mix && !prev) {
@@ -66,6 +75,74 @@ static void chorus(int32_t *L, int32_t *R, uint32_t n)
         R[i] = (int32_t)(((int64_t)(R[i] + ((m * wr) >> 15)) * norm) >> 15);
     }
     ch_mix_prev = mix;
+}
+
+/* ---- the ping-pong delay (Fx.h PingPong), at half rate. The lines hold Q14 (half scale): the soft clip lets the
+ * feedback reach 1.2. */
+#define DL_LEN 32768u                           /* 1.49 s at 22.05 kHz */
+static int16_t dl_bl[DL_LEN] ZPOOL, dl_br[DL_LEN] ZPOOL;
+static uint32_t dl_w, dl_wow_n, dl_seed = 77u;
+static int32_t dl_t = 6615 << 16;               /* the delay time, gliding (0.12 s), half-rate frames Q16 */
+static int32_t dl_lpl, dl_lpr, dl_prevL, dl_prevR, dl_mix_prev, dl_wow_from, dl_wow_to, dl_d8 = 6615 << 8;
+#define DL_GLIDE8 3241482                       /* 1 - exp(-8 / (0.12 x 22050)): 0.12 s, stepped every 8 frames, Q30 */
+
+static int32_t dl_soft(int32_t x)               /* Common.h softClip: linear to 0.8, then bending toward 1.2 */
+{
+    int32_t a = x < 0 ? -x : x, y;
+    uint32_t over;
+    if (a < 26214) return x;
+    if (a > 4 * 32768) a = 4 * 32768;
+    over = (uint32_t)(a - 26214);
+    y = 26214 + (int32_t)((over << 15) / (32768u + ((over * 5u) >> 1)));   /* over / (1 + 2.5 over) */
+    return x < 0 ? -y : y;
+}
+static int32_t dl_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), linear; Q14 -> Q15 */
+{
+    uint32_t i0 = (dl_w - 1u - (uint32_t)(d_q8 >> 8)) & (DL_LEN - 1u), i1 = (i0 - 1u) & (DL_LEN - 1u);
+    int32_t f = d_q8 & 255;
+    return (b[i0] + (((b[i1] - b[i0]) * f) >> 8)) << 1;
+}
+static int16_t dl_q14(int32_t x) { x >>= 1; return (int16_t)(x > 32767 ? 32767 : x < -32768 ? -32768 : x); }
+
+static void delay(int32_t *L, int32_t *R, uint32_t n)
+{
+    int32_t mix = zf_mix(zf_delay, zf_dmod), prev = dl_mix_prev, target = DL_TIME[zf_dtime & 127] << 8;
+    int32_t fbk = (zf_dfb & 127) * 237, G = DL_LP[zf_dtone & 127];       /* feedback x 0.92, Q15 */
+    uint32_t i;
+    for (i = 0; i + 1u < n; i += 2u) {
+        int32_t m = prev + (int32_t)(((mix - prev) * (int32_t)i) >> 8), in, d8, yl, yr, v, fl, fr;
+        if (!(i & 15u)) {                       /* every 8 frames (0.36 ms): the time's glide and the wow */
+            int32_t t, sm, w;
+            dl_t += M30(target - dl_t, DL_GLIDE8);
+            dl_wow_n += 8u;
+            if (dl_wow_n >= 36750u) {           /* the wow: a new random point every 1.7 s (0.6 Hz), eased toward */
+                dl_wow_n = 0;
+                dl_wow_from = dl_wow_to;
+                dl_seed = dl_seed * 1664525u + 1013904223u;
+                dl_wow_to = (int32_t)(dl_seed >> 16) - 32768;
+            }
+            t = (int32_t)((dl_wow_n * 58435u) >> 16);                        /* Q15 (2^31 / 36750) */
+            sm = (int32_t)(((int64_t)t * t >> 15) * (98304 - 2 * t) >> 15); /* t^2 (3 - 2t) */
+            w = dl_wow_from + (int32_t)(((int64_t)(dl_wow_to - dl_wow_from) * sm) >> 15);
+            d8 = dl_t >> 8;
+            dl_d8 = d8 + (((d8 >> 4) * ((w * 79) >> 16)) >> 11);           /* x (1 + 0.0012 wow) */
+        }
+        d8 = dl_d8;
+        yl = dl_read(dl_bl, d8);
+        yr = dl_read(dl_br, d8);
+        in = (L[i] + R[i] + L[i + 1u] + R[i + 1u]) >> 2;                     /* 0.5 (L + R), two frames */
+        v = M30(yr - dl_lpr, G); fr = v + dl_lpr; dl_lpr = fr + v;           /* the tone: TPT one-pole low-passes */
+        v = M30(yl - dl_lpl, G); fl = v + dl_lpl; dl_lpl = fl + v;
+        dl_bl[dl_w] = dl_q14(dl_soft(in + ((fbk * fr) >> 15)));             /* in, and the right line's echo, */
+        dl_br[dl_w] = dl_q14(dl_soft((fbk * fl) >> 15));                     /* into the left; the left's into the right */
+        dl_w = (dl_w + 1u) & (DL_LEN - 1u);
+        if (m) {                                /* back to the full rate, as the reverb */
+            L[i] += (((dl_prevL + yl) >> 1) * m) >> 15; L[i + 1u] += (yl * m) >> 15;
+            R[i] += (((dl_prevR + yr) >> 1) * m) >> 15; R[i + 1u] += (yr * m) >> 15;
+        }
+        dl_prevL = yl; dl_prevR = yr;
+    }
+    dl_mix_prev = mix;
 }
 
 /* ---- reverb (Fx.h Reverb), at half rate */
@@ -108,7 +185,7 @@ static int32_t rv_read(const int32_t *b, int32_t d_q8)
 
 static void reverb(int32_t *L, int32_t *R, uint32_t n)
 {
-    int32_t mix = zf_reverb * 258, prev = rv_mix_prev, shim = zf_shimmer * 258, G = RV_DAMP[zf_damp & 127];
+    int32_t mix = zf_mix(zf_reverb, zf_rmod), prev = rv_mix_prev, shim = zf_shimmer * 258, G = RV_DAMP[zf_damp & 127];
     int32_t mod, y[RV_N], h[RV_N];
     uint32_t i, k, len, s, j;
     if (!mix && !prev) {                        /* off: let the tail ring out for 2 s, then sleep */

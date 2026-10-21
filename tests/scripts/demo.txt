@@ -1,104 +1,162 @@
-# Zen-Lite 0.3 demo, D dorian, the default sound (chorus and reverb on)
+# Zen-Lite 0.5 demo, D dorian: presets (the PRESETS encoder) and the plates (HOME's knobs). tests/scripts/demo.txt
 100 shot
-300 keys 0x20002
-1900 keys 0
-1950 keys 0x20100
-3500 keys 0
-3550 keys 0x408000
-5100 keys 0
-5150 keys 0x2100002
-7300 keys 0
-7400 btn 8
-7450 enc 5 2
-7460 enc 5 2
-7470 enc 5 2
-7480 enc 5 2
-7490 enc 5 2
-7500 enc 5 2
-7510 enc 5 2
-7520 enc 5 2
-7530 enc 5 2
-7540 enc 5 2
-7550 enc 5 2
-7560 enc 5 2
-7570 enc 5 2
-7580 enc 5 2
-7590 enc 5 2
-7600 enc 5 2
-7700 btn 6
-7750 btn 6
-7800 shot
-7900 keys 0x22000
-7950 enc 2 -1
-9300 enc 2 1
-10700 enc 2 1
-12100 enc 2 1
-13500 keys 0
-13550 btn 2
-13600 enc 5 3
-13620 enc 5 3
-13640 enc 5 3
-13660 enc 5 3
-13680 enc 5 3
-13700 enc 5 3
-13720 enc 5 3
-13740 enc 5 3
-13760 enc 5 3
-13780 enc 5 3
-13800 enc 5 3
-13820 enc 5 3
-13840 enc 5 3
-13860 enc 5 3
-13880 enc 5 3
-13900 enc 5 3
-13920 enc 5 3
-13940 enc 5 3
-13960 enc 5 3
-13980 enc 5 3
-14000 enc 5 3
-14020 enc 5 3
-14040 enc 5 3
-14060 enc 5 3
-14080 enc 5 3
-13600 enc 3 2
-13620 enc 3 2
-13640 enc 3 2
-13660 enc 3 2
-13680 enc 3 2
-13700 enc 3 2
-13720 enc 3 2
-13740 enc 3 2
-13760 enc 3 2
-13780 enc 3 2
-13800 enc 3 2
-13820 enc 3 2
-13840 enc 3 2
-13860 enc 3 2
-13880 enc 3 2
-14300 shot
-14350 btn 2
-14400 shot
-14450 btn 4
-14500 shot
-14550 btn 8
-14700 keys 0x2000
-14900 keys 0x3000
-15280 keys 0x2000
-15320 keys 0x12000
-15700 keys 0x2000
-15740 keys 0x42000
-16120 keys 0x2000
-16160 keys 0x82000
-16540 keys 0x2000
-16580 keys 0x42000
-16960 keys 0x2000
-17000 keys 0x12000
-17380 keys 0x2000
-17420 keys 0x3000
-17800 keys 0x2000
-17840 keys 0x2800
-18220 keys 0x2000
-18260 keys 0x3000
-18640 keys 0x2000
-18880 keys 0
-24680 end
+300 enc 6 2
+500 shot
+700 keys 0x1002
+700 enc 2 2
+790 enc 2 2
+880 enc 2 2
+970 enc 2 2
+1060 enc 2 2
+1150 enc 2 2
+1240 enc 2 2
+1330 enc 2 2
+1420 enc 2 2
+1510 enc 2 2
+1600 enc 2 2
+1690 enc 2 2
+1780 enc 2 2
+1870 enc 2 2
+1960 enc 2 2
+2050 enc 2 2
+2140 enc 2 2
+2230 enc 2 2
+2320 enc 2 2
+2400 keys 0x2
+2410 enc 2 2
+2500 enc 2 2
+2590 enc 2 2
+3000 keys 0x0
+3100 keys 0x12000
+4800 keys 0x2000
+5400 keys 0x0
+5500 keys 0x40100
+5500 enc 5 2
+5610 enc 5 2
+5720 enc 5 2
+5830 enc 5 2
+5940 enc 5 2
+6050 enc 5 2
+6160 enc 5 2
+6270 enc 5 2
+6380 enc 5 2
+6490 enc 5 2
+6600 enc 5 2
+6710 enc 5 2
+6820 enc 5 2
+6930 enc 5 2
+7040 enc 5 2
+7150 enc 5 2
+7200 keys 0x100
+7260 enc 5 2
+7370 enc 5 2
+7800 keys 0x0
+7900 keys 0x4400
+9300 shot
+9600 keys 0x400
+10200 keys 0x0
+10300 enc 6 16
+10600 keys 0x1002
+10930 keys 0x2
+10960 keys 0x10002
+11290 keys 0x2
+11320 keys 0x40002
+11650 keys 0x2
+11680 keys 0x80002
+12010 keys 0x2
+12040 keys 0x40002
+12370 keys 0x2
+12400 keys 0x12000
+12730 keys 0x2000
+12760 keys 0x3000
+13090 keys 0x2000
+13120 keys 0x2200
+13450 keys 0x2000
+13480 keys 0x3000
+13810 keys 0x2000
+13840 keys 0x12000
+14170 keys 0x2000
+14200 keys 0x3000
+14530 keys 0x2000
+14960 keys 0x0
+15460 enc 6 67
+15760 enc 4 2
+15760 keys 0x2000
+15860 enc 4 2
+15960 enc 4 2
+16060 enc 4 2
+16160 enc 4 2
+16260 enc 4 2
+16360 enc 4 2
+16460 enc 4 2
+16560 enc 4 2
+16660 enc 4 2
+16760 enc 4 2
+16860 enc 4 2
+16960 enc 4 2
+17060 enc 4 2
+17160 enc 4 2
+17260 enc 4 2
+17360 enc 4 2
+17460 enc 4 2
+17560 enc 4 2
+17660 enc 4 2
+18360 keys 0x0
+18560 keys 0x100
+21160 keys 0x0
+21360 keys 0x2
+23960 keys 0x0
+24160 keys 0x400
+25460 shot
+26760 keys 0x0
+26960 enc 6 2
+27260 keys 0x80
+27960 keys 0x880
+28080 keys 0x800
+28660 keys 0x1800
+28780 keys 0x1000
+29360 keys 0x1800
+29480 keys 0x800
+30060 keys 0x880
+30180 keys 0x80
+30760 keys 0xc0
+30880 keys 0x40
+31460 keys 0xc0
+31580 keys 0x80
+32460 keys 0x0
+33760 btn 0
+33810 enc 6 91
+34160 keys 0x2
+34460 enc 3 2
+34580 enc 3 2
+34700 enc 3 2
+34820 enc 3 2
+34940 enc 3 2
+35060 enc 3 2
+35180 enc 3 2
+35300 enc 3 2
+35420 enc 3 2
+35540 enc 3 2
+35660 enc 3 2
+35780 enc 3 2
+35900 enc 3 2
+36020 enc 3 2
+36140 enc 3 2
+36260 enc 3 2
+36380 enc 3 2
+36500 enc 3 2
+36620 enc 3 2
+36740 enc 3 2
+36860 enc 3 2
+36980 enc 3 2
+37100 enc 3 2
+37160 shot
+37220 enc 3 2
+37340 enc 3 2
+37460 enc 3 2
+37580 enc 3 2
+37700 enc 3 2
+37820 enc 3 2
+37940 enc 3 2
+39160 keys 0x0
+43160 end

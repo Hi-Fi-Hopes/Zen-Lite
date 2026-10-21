@@ -6,20 +6,33 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: step 2b
+## Status: step 3.2 (0.5)
 
-Six voices of the plugin's two engines into its ladder filter, with its envelope, stereo spread and look-ahead
-limiter at -1 dBFS:
+Six voices of the plugin's two engines into its ladder filter, with its envelopes, modulation, effects and
+look-ahead limiter at -1 dBFS, and 179 of its presets:
 
 - **Engine A**: three analog oscillators, saw / square / triangle / sine, SHAPE (softens the saw, narrows the
-  square, folds the triangle, self-FM on the sine) and DETUNE (spreads the two side oscillators), TUNE in semitones
-- **Engine B**: the four wavetables (AIR, GLASS, VOX, REED), POSITION scanning their eight frames, WARP
-- **Effects**: the plugin's chorus and shimmer reverb (the reverb runs at half the sample rate: half the CPU),
-  and a TONE setting for the speaker
+  square, folds the triangle, self-FM on the sine), DETUNE (spreads the two side oscillators), LEVEL
+- **Engine B**: the four wavetables (AIR, GLASS, VOX, REED), POSITION scanning their eight frames, WARP, LEVEL
+- **Filter**: the 4-pole ladder with DRIVE, ENV AMT (ENV 1, either way) and KEY TRACK
+- **Modulation**: ENV 1 and ENV 2, two LFOs (sine, triangle, saw, square, drift), a smoothed random, and 12 slots,
+  source to destination, as the plugin's. Sources: the envelopes, LFOs, random, velocity, pressure (poly and
+  channel), mod wheel, slide (CC 74), the key, and the four plates. Destinations: pitch, A tune / detune / shape /
+  level, B position / warp / level, cutoff, resonance, drive, amp, pan, the LFO rates and the effect mixes
+- **The plates** BLOOM, MORPH, ECHOES, SPACE are the HOME page's knobs: macros, through the plugin's plate kit in
+  slots 1-7 (BLOOM opens the filter, MORPH moves B's position, ECHOES brings in the delay, SPACE the reverb)
+- **Effects**: the plugin's chorus, ping-pong delay (up to 1.48 s, with its tape wow) and shimmer reverb (the delay
+  and reverb run at half the sample rate), VOLUME, and a SPEAKER setting for the FM-1's speaker
+- **Presets**: the PRESETS encoder steps through Zenthesizer's factory presets, converted
+  (`tools/make_presets.sh`). Left out, as there is no engine for them here: B UNISON, AIR (breath noise) and the
+  arpeggiator. The 26 presets built on the plucked STRING oscillator are skipped. A synced delay becomes the same
+  time at 90 BPM, the plugin's tempo without a host. Every preset plays within 3 dB of the plugin's level
+  (`tests/check_audio.sh`); those that leaned on unison sound thinner.
 - **The keyboard** plays the key: white keys are the scale, black keys the seven chords
 
 Integer maths only (the FM-1 has no FPU); every curve is computed once by `tools/gen_tables.py` from the plugin's
-own formulas. Every build compares the sound with the plugin's own engine, and every chord with its chord builder.
+own formulas. Every build compares the sound with the plugin's own engine (38 cases, and every preset), and every chord with its
+chord builder.
 
 ### The keyboard (SCALE keys)
 
@@ -34,25 +47,36 @@ Chord notes are the first to give way when all six voices are busy, so a melody 
 
 ### Pages
 
-| Button | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
-| --- | --- | --- | --- | --- |
-| HOME | CUTOFF | RESONANCE | POSITION | A-B MIX |
-| EDIT | Engine A: WAVE | SHAPE | DETUNE | TUNE |
-| EDIT again | Engine B: TABLE | POSITION | WARP | |
-| ENV | ATTACK | DECAY | SUSTAIN | RELEASE |
-| FX | CHORUS | REVERB | DECAY | SHIMMER |
-| FX again | SIZE | DAMP | DEPTH (chorus) | TONE: FLAT, SOFT, LOW CUT |
-| GLO | KEY | SCALE | KEYS | SPREAD |
+A second press of a button steps to its next page.
 
-TONE shapes the headphones and USB audio too: keep it on FLAT when recording.
+| Button | Page | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
+| --- | --- | --- | --- | --- | --- |
+| HOME | the preset | BLOOM | MORPH | ECHOES | SPACE |
+| EDIT | FILTER | CUTOFF | RESONANCE | DRIVE | ENV AMT |
+| | ENGINE A | WAVE | SHAPE | DETUNE | LEVEL |
+| | ENGINE B | TABLE | POSITION | WARP | LEVEL |
+| | VOICE | TUNE | GLIDE | VEL SENS | VOLUME |
+| ENV | AMP ENV, ENV 1, ENV 2 | ATTACK | DECAY | SUSTAIN | RELEASE |
+| LFO | LFO | 1 RATE | 1 SHAPE | 2 RATE | 2 SHAPE |
+| | RANDOM + KEY | RANDOM (rate) | SMOOTH | KEY TRACK | STEREO |
+| | MOD | SLOT (1-12) | SOURCE | DEST | AMOUNT |
+| FX | FX | CHORUS | REVERB | DECAY | SHIMMER |
+| | SPACE | SIZE | DAMP | DEPTH (chorus) | SPEAKER: FLAT, SOFT, LOW CUT |
+| | DELAY | TIME | FEEDBACK | TONE | MIX |
+| GLO | KEY + SCALE | KEY | SCALE | KEYS | SPREAD |
+
+Turning PRESETS loads a preset at once (the plates go back to 0; key, scale and SPEAKER stay). Edits are kept
+(the FM-1 saves them when it is quiet) but there are no user preset slots yet: the next preset turn replaces them.
+SPEAKER shapes the headphones and USB audio too: keep it on FLAT when recording.
 
 **The CPU guard**: if the sound ever takes more than 85 % of an audio block, the oldest let-go tail, else the oldest
 chord note, else the oldest note fades out in 4 ms (DROP shows on the screen), so the sound never breaks up.
 
-OCT- / OCT+ the octave, MASTER the volume; USB-MIDI notes in play chromatically, with velocity. Everything is kept
-when the FM-1 is switched off. The screen's last lines: **CPU** (keep it under 50 %), **LIMIT**, octave, voices.
+OCT- / OCT+ the octave, MASTER the volume. USB-MIDI in: notes (chromatic, with velocity), pitch bend (+-2
+semitones), mod wheel (CC 1), CC 74, channel and poly pressure. The screen's last lines: **CPU**, **LIMIT**,
+octave, voices.
 
-Next (step 3): the screens of the mock-ups with a scope on HOME, plates A-D as macros, LFOs and mod envelopes, presets.
+Next (step 3.3): the screens of the mock-ups, with a simple scope on HOME.
 
 ## Install, test, go back
 
@@ -75,7 +99,8 @@ the plugin's own engine. Locally (Linux x86-64, or Docker): see `docs/` and `too
 
 ```sh
 sh tests/run_host.sh                                    # build/host/zenlite.wav and screens
-ZEN_SRC=../Zenthesizer sh tests/check_audio.sh          # Zen-Lite vs the plugin, six test cases
+ZEN_SRC=../Zenthesizer sh tests/check_audio.sh          # Zen-Lite vs the plugin: 38 cases, every preset
+ZEN_SRC=../Zenthesizer sh tools/make_presets.sh         # firmware/gen/zen_presets.h from the plugin's presets
 ```
 
 Package identity `FM-1_950`. GPL-3.0-only; credits in `LICENSING.md`.
