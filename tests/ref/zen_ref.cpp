@@ -23,7 +23,8 @@ static const char* const PNAME[P_N] = { "PA","PB","PC","PD", "CUT","RES","DRIVE"
     "TABLE","POS","WARP","BLEV", "TUNE","GLIDE","VELS","VOL", "ATT","DEC","SUS","REL", "E1A","E1D","E1S","E1R",
     "E2A","E2D","E2S","E2R", "L1RATE","L1SHAPE","L2RATE","L2SHAPE", "RRATE","RSMOOTH","KTRACK","WIDTH",
     "CHORUS","REVERB","RDECAY","SHIMMER", "SIZE","DAMP","DEPTH","TONE", "DTIME","DFB","DTONE","DELAY",
-    "KEY","SCALE","KEYS","SPREAD" };
+    "KEY","SCALE","KEYS","SPREAD", "ARPMODE","ARPRATE","ARPOCT","ARPGATE", "BPM","HOLD","SYNC",
+    "SLEN","SRATE","SGATE" };
 
 int main (int argc, char** argv)
 {

@@ -6,7 +6,7 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: step 3 done (0.9)
+## Status: 1.0
 
 Six voices of the plugin's two engines into its ladder filter, with its envelopes, modulation, effects and
 look-ahead limiter at -1 dBFS, and 179 of its presets:
@@ -64,6 +64,23 @@ A second press of a button steps to its next page.
 | | SPACE | SIZE | DAMP | DEPTH (chorus) | SPEAKER: FLAT, SOFT, LOW CUT |
 | | DELAY | TIME | FEEDBACK | TONE | MIX |
 | GLO | KEY + SCALE | KEY | SCALE | KEYS | SPREAD |
+| ARP | ARP | MODE: OFF, UP, DOWN, UP-DOWN, RANDOM, AS PLAYED | RATE: 1/4 .. 1/32 (with triplets) | OCTAVES 1-4 | GATE |
+| | TEMPO | BPM | HOLD | SYNC: INTERNAL, MIDI CLOCK | CLEAR (the sequence: four clicks right) |
+| SEQ | SEQUENCER | STEP (the one REC writes next) | LENGTH 1-16 | RATE | GATE |
+
+### The arpeggiator and the sequencer
+
+- **The arp** (the plugin's): set a MODE and play. Held keys, chords from the black keys and MIDI notes are
+  arpeggiated, one note at a time, over 1-4 octaves. HOLD keeps the pattern going after you let go, until you play
+  again. ARP lights while the arp is on.
+- **The sequencer**: 16 steps, each a note or a chord (up to six notes). **REC** (lit) writes steps from the STEP
+  card on: play a note or a black-key chord, and when you let go it is written and the next step comes up. **SEQ**
+  while recording writes a rest. REC again to stop. **PLAY** plays the sequence from step 1, and stops it. The
+  sequencer page shows the 16 steps, the one being written outlined, the one playing lit. The sequence is saved
+  with the settings.
+- **Tempo**: BPM, or SYNC to MIDI CLOCK (from Ableton, say). On MIDI clock, start and stop play and stop the
+  sequence and the arp follows the clock. Both run in the audio interrupt, so the screen cannot make them stagger:
+  on the computer they land within 4 ms of the beat.
 
 Turning PRESETS loads a preset at once (the plates go back to 0; key, scale and SPEAKER stay). Edits are kept
 (the FM-1 saves them when it is quiet) but there are no user preset slots yet: the next preset turn replaces them.

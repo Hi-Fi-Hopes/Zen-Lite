@@ -21,6 +21,9 @@ enum {
     P_SIZE, P_DAMP, P_DEPTH, P_TONE,            /* SPACE */
     P_DTIME, P_DFB, P_DTONE, P_DELAY,           /* DELAY */
     P_KEY, P_SCALE, P_KEYS, P_SPREAD,           /* KEY + SCALE */
+    P_ARPMODE, P_ARPRATE, P_ARPOCT, P_ARPGATE,  /* ARP */
+    P_BPM, P_HOLD, P_SYNC,                      /* TEMPO */
+    P_SLEN, P_SRATE, P_SGATE,                   /* SEQUENCER (with the step being edited) */
     P_N,
     P_SOUND_FIRST = P_CUT, P_SOUND_END = P_KEY  /* a preset sets these, all but SPEAKER (not the plates, key, scale) */
 };
@@ -42,6 +45,9 @@ static const param_t PARAM[P_N] = {
     {"SIZE", 0, 127, 76}, {"DAMP", 0, 127, 64}, {"DEPTH", 0, 127, 64}, {"SPEAKER", 0, 2, 0},
     {"TIME", 0, 127, 57}, {"FEEDBACK", 0, 127, 44}, {"TONE", 0, 127, 64}, {"MIX", 0, 127, 0},
     {"KEY", 0, 11, 2}, {"SCALE", 1, 10, 3}, {"KEYS", 0, 1, 0}, {"SPREAD", 0, 1, 0},
+    {"MODE", 0, 5, 0}, {"RATE", 0, 5, 3}, {"OCTAVES", 1, 4, 1}, {"GATE", 0, 127, 76},
+    {"BPM", 40, 240, 100}, {"HOLD", 0, 1, 0}, {"SYNC", 0, 1, 0},
+    {"LENGTH", 1, 16, 16}, {"RATE", 0, 5, 3}, {"GATE", 0, 127, 76},
 };
 /* the plate kit (Presets.h kit()): slots 1-7 in every preset; a preset's own go in 8-12. Sources and
  * destinations are numbered as zen_mod.h's ZS_ / ZD_ (the plugin's order); amounts Q10 (1024 = 100 %). */

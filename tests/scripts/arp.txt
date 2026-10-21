@@ -1,0 +1,6 @@
+100 btn 10
+200 enc 2 1
+400 keys 0x4880
+1000 shot
+2200 keys 0
+2900 end

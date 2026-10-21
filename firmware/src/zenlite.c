@@ -35,10 +35,10 @@
 #endif
 
 /* ---- the pages: four knobs each (zen_params.h); the MOD page edits the slots, not a parameter */
-enum { P_MSLOT = P_N, P_MSRC, P_MDST, P_MAMT, P_NONE = 255 };
-#define NPAGES 15u
+enum { P_MSLOT = P_N, P_MSRC, P_MDST, P_MAMT, P_SSTEP, P_SCLEAR, P_NONE = 255 };   /* knobs that are not parameters */
+#define NPAGES 18u
 static const char *const PAGE_NAME[NPAGES] = {"HOME", "FILTER", "ENGINE A", "ENGINE B", "VOICE", "AMP ENV", "ENV 1",
-    "ENV 2", "LFO", "RANDOM + KEY", "MOD", "FX", "SPACE", "DELAY", "KEY + SCALE"};
+    "ENV 2", "LFO", "RANDOM + KEY", "MOD", "FX", "SPACE", "DELAY", "KEY + SCALE", "ARP", "TEMPO", "SEQUENCER"};
 #define PG_HOME 0u
 #define PG_EDIT 1u                              /* 1-4 */
 #define PG_ENV 5u                               /* 5-7 */
@@ -46,10 +46,15 @@ static const char *const PAGE_NAME[NPAGES] = {"HOME", "FILTER", "ENGINE A", "ENG
 #define PG_MOD 10u
 #define PG_FX 11u                               /* 11-13 */
 #define PG_GLO 14u
+#define PG_ARP 15u                              /* 15-16 */
+#define PG_SEQ 17u
 static uint32_t page_param(uint32_t page, uint32_t r)
 {
+    static const uint8_t EXTRA[3][4] = {{P_ARPMODE, P_ARPRATE, P_ARPOCT, P_ARPGATE}, {P_BPM, P_HOLD, P_SYNC, P_SCLEAR},
+                                        {P_SSTEP, P_SLEN, P_SRATE, P_SGATE}};
     if (page < PG_MOD) return page * 4u + r;
     if (page == PG_MOD) return P_MSLOT + r;
+    if (page >= PG_ARP) return EXTRA[page - PG_ARP][r];
     return (page - 1u) * 4u + r;
 }
 static const char *const SRC_NAME[ZS_N] = {"--", "ENV 1", "ENV 2", "LFO 1", "LFO 2", "RANDOM", "PRESSURE", "VELOCITY",
@@ -59,12 +64,18 @@ static const char *const DST_NAME[ZD_N] = {"--", "PITCH", "A TUNE", "A DETUNE", 
     "CHORUS", "DELAY", "REVERB"};
 #define DST_SKIP(d) ((d) == ZD_BUNISON || (d) == ZD_AIR)   /* the plugin's, without an engine here */
 
-#define SET_VER 5u
-typedef struct { uint8_t ver; int8_t oct; uint16_t preset; uint8_t p[P_N]; zps_t slot[ZM_NSLOTS]; } set_t;
+#define SET_VER 6u
+#define SEQ_N 16u                               /* steps */
+#define SEQ_V 6u                                /* notes a step (a chord) */
+typedef struct {
+    uint8_t ver; int8_t oct; uint16_t preset; uint8_t p[P_N]; zps_t slot[ZM_NSLOTS];
+    uint8_t seq[SEQ_N][SEQ_V];                  /* the sequence: MIDI notes, 0 = none */
+} set_t;
 static set_t set;
 static uint32_t mod_sel = 7;                    /* the MOD page's slot (0-11): the first after the plate kit */
 
-static int32_t q10(uint32_t k) { return (int32_t)(k * 1024u / 127u); }
+static inline __attribute__((always_inline)) int32_t q10(uint32_t k) { return (int32_t)(k * 1024u / 127u); }   /* (inline: the RAM code uses it) */
+static volatile int32_t zp_steplen[6];          /* the arp's and sequencer's step at each rate, samples Q8 (apply) */
 static int32_t bip10(uint32_t k)                /* a bipolar knob: 64 is 0, -1024..1024 */
 {
     int32_t b = ((int32_t)k - 64) * 1024 / 63;
@@ -93,6 +104,11 @@ static void apply(void)
     zf_size = p[P_SIZE]; zf_damp = p[P_DAMP]; zf_tone = p[P_TONE];
     zf_dtime = p[P_DTIME]; zf_dfb = p[P_DFB]; zf_dtone = p[P_DTONE]; zf_delay = p[P_DELAY];
     for (k = 0; k < 4u; k++) zm_plate_t[k] = p[P_PA + k] * 258;
+    {                                           /* a step at each rate, in samples Q8: 44100 x 60 x 256 / BPM a beat */
+        int32_t beat = (int32_t)(677376000u / (p[P_BPM] < 40u ? 40u : p[P_BPM]));
+        zp_steplen[0] = beat; zp_steplen[1] = beat / 2; zp_steplen[2] = beat / 3;
+        zp_steplen[3] = beat / 4; zp_steplen[4] = beat / 6; zp_steplen[5] = beat / 8;
+    }
     for (k = 0; k < ZM_NSLOTS; k++) {
         zm_slot[k].src = set.slot[k].src; zm_slot[k].dst = set.slot[k].dst; zm_slot[k].amt = set.slot[k].amt;
     }
@@ -109,6 +125,212 @@ static void load_preset(uint32_t i)            /* the sound of preset i; the pla
     for (k = 0; k < ZM_NSLOTS; k++) set.slot[k] = pr->s[k];
     set.preset = (uint16_t)(i % ZPRESETS);
     apply();
+}
+
+/* ---- notes. The main loop asks (a queue), the audio interrupt plays: it starts and stops the voices, and runs the
+ * arpeggiator and the sequencer on its own clock (every 5.8 ms, whatever the screen is doing), or on MIDI clock,
+ * which the USB interrupt counts as it arrives (usb.c usb_clk). */
+#define ZQ 64u
+enum { EV_ON = 1, EV_OFF, EV_PRESS };
+typedef struct { uint8_t type, note, vel, chord; uint32_t id; } zev_t;
+static zev_t zq[ZQ];
+static volatile uint32_t zq_w, zq_r;
+static void zq_push(uint32_t type, uint32_t note, uint32_t vel, uint32_t chord, uint32_t id)
+{
+    zev_t *e;
+    if (zq_w - zq_r >= ZQ) return;              /* (64 in one 5.8 ms block: not from two hands) */
+    e = &zq[zq_w % ZQ];
+    e->type = (uint8_t)type; e->note = (uint8_t)note; e->vel = (uint8_t)vel; e->chord = (uint8_t)chord; e->id = id;
+    __asm__ volatile("" ::: "memory");          /* the event before the index that publishes it */
+    zq_w++;
+}
+#ifdef DINGHY_HOST
+static volatile struct { uint32_t ticks, starts, conts, stops; } usb_clk;   /* the host script's MIDI feeds it */
+#endif
+
+/* the voices, from the interrupt only: a silent voice, else the quietest let-go one, else the oldest (chord notes
+ * before melody notes) */
+static uint32_t ages, last_started = 60;
+static volatile uint32_t zv_starts;             /* notes started: the screen sends a ripple */
+ZFAST static void zv_start(uint32_t note, uint32_t vel, uint32_t chord, uint32_t id)
+{
+    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
+    zvoice_t *z;
+    if (note > 127u || !vel) return;
+    for (v = 0; v < ZV; v++) {
+        uint32_t score = !zv[v].stage && zv[v].seen == zv[v].trig ? 0u
+                       : !zv[v].gate ? 1u + ((uint32_t)zv[v].env >> 3)
+                       : (zv[v].chord ? 0x40000000u : 0x80000000u) + (zv[v].age & 0x3FFFFFFFu);
+        if (score < best) { best = score; pick = v; }
+    }
+    z = &zv[pick];
+    z->note = (uint8_t)note;
+    z->chord = (uint8_t)chord;
+    z->age = ++ages;
+    z->tag = id;
+    z->velq = (int32_t)(vel * 258u);            /* Q15 */
+    z->press_t = 0;
+    z->from = (int32_t)(last_started << 20);    /* with GLIDE, from the last note played */
+    last_started = note;
+    z->gate = 1;
+    z->trig++;
+    zv_starts++;
+}
+ZFAST static void zv_stop(uint32_t id)
+{
+    uint32_t v;
+    for (v = 0; v < ZV; v++)
+        if (zv[v].tag == id) zv[v].gate = 0;
+}
+
+/* the clock: samples a step at each rate (zp_steplen, from BPM), MIDI clocks a step */
+static const uint8_t TPS[6] = {24, 12, 8, 6, 4, 3};   /* 1/4 1/8 1/8T 1/16 1/16T 1/32 */
+static uint32_t clk_ticks, clk_starts, clk_conts, clk_stops, clk_since;
+static int32_t clk_spt = 1102;                  /* samples between MIDI clocks, averaged (120 BPM to start) */
+ZFAST static int32_t step_len(uint32_t rate, uint32_t midi)
+{
+    rate = rate > 5u ? 3u : rate;
+    return midi ? clk_spt * TPS[rate] * 256 : zp_steplen[rate];
+}
+
+/* the arpeggiator (Engine.h arpTick): the held notes, sorted (or as played), over 1-4 octaves, one at a time */
+typedef struct { uint32_t id; uint8_t note, vel, down; } zheld_t;
+static zheld_t arp_held[16];
+static uint32_t arp_n, arp_latched, arp_step, arp_cur, arp_seed = 12345u, arp_ticks, arp_first, arp_was;
+static int32_t arp_cnt, arp_gate;
+static volatile uint32_t arp_count;             /* for the screen and the save: notes the arp holds */
+ZFAST static void arp_add(uint32_t id, uint32_t note, uint32_t vel)
+{
+    if (arp_latched) { arp_n = 0; arp_latched = 0; }
+    if (arp_n < 16u) { arp_held[arp_n].id = id; arp_held[arp_n].note = (uint8_t)note; arp_held[arp_n].vel = (uint8_t)vel;
+                       arp_held[arp_n].down = 1; arp_n++; }
+    if (arp_n == 1u) { arp_cnt = 0; arp_step = 0; arp_first = 1; }
+}
+ZFAST static uint32_t arp_off(uint32_t id)      /* 1: it was the arp's */
+{
+    uint32_t i, j, any = 0;
+    for (i = 0; i < arp_n; i++)
+        if (arp_held[i].id == id) break;
+    if (i == arp_n) return 0;
+    if (set.p[P_HOLD]) {                        /* HOLD: let go of them all and the pattern keeps going */
+        arp_held[i].down = 0;
+        for (j = 0; j < arp_n; j++) any |= arp_held[j].down;
+        if (!any) arp_latched = 1;
+        return 1;
+    }
+    for (j = i; j + 1u < arp_n; j++) arp_held[j] = arp_held[j + 1u];
+    arp_n--;
+    return 1;
+}
+ZFAST static void arp_fire(int32_t len)
+{
+    uint8_t pn[64], pv[64], order[16];
+    uint32_t i, j, o, n = 0, idx, oct = set.p[P_ARPOCT], mode = set.p[P_ARPMODE];
+    int32_t g = q10(set.p[P_ARPGATE]);
+    for (i = 0; i < arp_n; i++) order[i] = (uint8_t)i;
+    if (mode != 5u)                             /* all but AS PLAYED: low to high */
+        for (i = 1; i < arp_n; i++)
+            for (j = i; j > 0 && arp_held[order[j - 1u]].note > arp_held[order[j]].note; j--) {
+                uint8_t t = order[j]; order[j] = order[j - 1u]; order[j - 1u] = t;
+            }
+    for (o = 0; o < (oct < 1u ? 1u : oct > 4u ? 4u : oct); o++)
+        for (i = 0; i < arp_n && n < 64u; i++)
+            if (arp_held[order[i]].note + 12u * o <= 127u) { pn[n] = (uint8_t)(arp_held[order[i]].note + 12u * o);
+                                                              pv[n] = arp_held[order[i]].vel; n++; }
+    if (!n) return;
+    if (mode == 2u) idx = n - 1u - arp_step % n;                       /* DOWN */
+    else if (mode == 3u) {                                              /* UP-DOWN */
+        uint32_t cyc = n > 1u ? 2u * n - 2u : 1u, k = arp_step % cyc;
+        idx = k < n ? k : cyc - k;
+    } else if (mode == 4u) { arp_seed = arp_seed * 1664525u + 1013904223u; idx = (arp_seed >> 16) % n; }   /* RANDOM */
+    else idx = arp_step % n;                                            /* UP, AS PLAYED */
+    arp_step++;
+    zv_stop(arp_cur);
+    arp_cur = 0xA0000000u | (arp_step & 0xFFFFu);
+    zv_start(pn[idx], pv[idx], 0, arp_cur);
+    arp_gate = (len >> 10) * (g < 51 ? 51 : g); /* the gate: 5 % .. 100 % of the step */
+}
+
+/* the sequencer: 16 steps of up to six notes each (set.seq), played as chords are */
+static volatile uint32_t seq_req;               /* the main loop: 1 start, 2 stop */
+static volatile uint32_t seq_on, seq_now = 0xFFu;   /* playing; the step last played (for the screen) */
+static uint32_t seq_pos, seq_ticks, seq_first;
+static int32_t seq_cnt, seq_gate;
+ZFAST static void seq_release(void)
+{
+    uint32_t k;
+    for (k = 0; k < SEQ_V; k++) zv_stop(0xB0000000u | k);
+}
+ZFAST static void seq_fire(int32_t len)
+{
+    uint32_t k, n = set.p[P_SLEN] < 1u ? 1u : set.p[P_SLEN] > SEQ_N ? SEQ_N : set.p[P_SLEN], pos = seq_pos % n;
+    int32_t g = q10(set.p[P_SGATE]);
+    seq_release();
+    for (k = 0; k < SEQ_V; k++)
+        if (set.seq[pos][k]) zv_start(set.seq[pos][k], 100, 1, 0xB0000000u | k);
+    seq_now = pos;
+    seq_pos = (pos + 1u) % n;
+    seq_gate = (len >> 10) * (g < 51 ? 51 : g);
+}
+ZFAST static void seq_start(void) { seq_on = 1; seq_pos = 0; seq_cnt = 0; seq_first = 1; seq_ticks = 0; }
+ZFAST static void seq_stop(void) { seq_on = 0; seq_release(); seq_now = 0xFFu; }
+
+ZFAST static void zl_notes(uint32_t n)          /* once a block, before the voices */
+{
+    uint32_t mode = set.p[P_ARPMODE], midi = set.p[P_SYNC], nt, k;
+    int32_t blk = (int32_t)n << 8;
+    while (zq_r != zq_w) {                      /* what the main loop asked */
+        zev_t e = zq[zq_r % ZQ];
+        __asm__ volatile("" ::: "memory");
+        zq_r++;
+        if (e.type == EV_ON) { if (mode) arp_add(e.id, e.note, e.vel); else zv_start(e.note, e.vel, e.chord, e.id); }
+        else if (e.type == EV_OFF) { if (!(mode && arp_off(e.id))) zv_stop(e.id); }
+        else for (k = 0; k < ZV; k++) if (zv[k].tag == e.id) zv[k].press_t = (int32_t)e.vel * 258;
+    }
+    if ((!mode && arp_was) || (!set.p[P_HOLD] && arp_latched)) { zv_stop(arp_cur); arp_n = 0; arp_latched = 0; }
+    arp_was = mode;
+    arp_count = arp_n;
+
+    nt = usb_clk.ticks - clk_ticks;             /* MIDI clock: how many since the last block, and their spacing */
+    clk_ticks += nt;
+    clk_since += n;
+    if (nt) {
+        int32_t spt = (int32_t)(clk_since / nt);
+        if (spt > 200 && spt < 4000) clk_spt += (spt - clk_spt) / 8;   /* 30 .. 600 BPM */
+        clk_since = 0;
+    }
+    if (usb_clk.starts != clk_starts) { clk_starts = usb_clk.starts; if (midi) seq_start(); }
+    if (usb_clk.conts != clk_conts) { clk_conts = usb_clk.conts; if (midi) { seq_on = 1; seq_ticks = 0; } }
+    if (usb_clk.stops != clk_stops) { clk_stops = usb_clk.stops; if (midi) seq_stop(); }
+    if (seq_req) { if (seq_req == 1u) seq_start(); else seq_stop(); seq_req = 0; }
+
+    if (mode && arp_n) {                        /* the arp's steps */
+        int32_t len = step_len(set.p[P_ARPRATE], midi);
+        if (midi) {
+            uint32_t tps = TPS[set.p[P_ARPRATE] > 5u ? 3u : set.p[P_ARPRATE]];
+            if (arp_first) { arp_fire(len); arp_first = 0; arp_ticks = 0; }
+            arp_ticks += nt;
+            while (arp_ticks >= tps) { arp_ticks -= tps; arp_fire(len); }
+        } else {
+            arp_cnt -= blk;
+            if (arp_cnt <= 0) { arp_fire(len); arp_cnt += len; if (arp_cnt < 0) arp_cnt = len; }
+        }
+    } else arp_cnt = 0;
+    if (arp_gate > 0 && (arp_gate -= blk) <= 0) zv_stop(arp_cur);
+
+    if (seq_on) {                               /* the sequencer's */
+        int32_t len = step_len(set.p[P_SRATE], midi);
+        if (midi) {
+            uint32_t tps = TPS[set.p[P_SRATE] > 5u ? 3u : set.p[P_SRATE]];
+            seq_ticks += nt;
+            if (seq_first && nt) { seq_fire(len); seq_first = 0; seq_ticks = nt - 1u; }
+            while (seq_ticks >= tps) { seq_ticks -= tps; seq_fire(len); }
+        } else {
+            seq_cnt -= blk;
+            if (seq_cnt <= 0) { seq_fire(len); seq_cnt += len; if (seq_cnt < 0) seq_cnt = len; }
+        }
+    }
+    if (seq_gate > 0 && (seq_gate -= blk) <= 0) seq_release();
 }
 
 /* ---- the sound */
@@ -130,6 +352,7 @@ ZFAST static void zl_audio(int32_t *out, uint32_t n)   /* the sound, in RAM (app
 #ifndef DINGHY_HOST
     uint32_t t0 = fm1_ticks();
 #endif
+    zl_notes(n);                                /* the notes: the main loop's, the arp's, the sequencer's */
     zm_global();                                /* the slots aimed at the LFO rates and the effect mixes */
     zf_cmod = zm_g[ZD_CHORUS] * 32; zf_dmod = zm_g[ZD_DELAY] * 32; zf_rmod = zm_g[ZD_REVERB] * 32;
     zm_block();                                 /* the LFOs, random and plates for this block's 16 control steps */
@@ -171,46 +394,26 @@ ZFAST static void zl_audio(int32_t *out, uint32_t n)   /* the sound, in RAM (app
 static void (*volatile zl_audio_fn)(int32_t *, uint32_t) = zl_audio;
 static void app_audio(int32_t *out, uint32_t n) { zl_audio_fn(out, n); }
 
-/* ---- voices: a note gets a tag, and is let go by its tag (a chord and a key may share a note) */
-static uint32_t ages, tags, last_started = 60;
+/* ---- voices: a note gets a tag, and is let go by its tag (a chord and a key may share a note); the audio interrupt
+ * does the rest (zl_notes) */
+static uint32_t tags;
 static void ripple_start(void);
-
+static void rec_capture(uint32_t note);
 static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
 {
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
-    zvoice_t *z;
     if (note > 127u || !vel) return 0;
-    for (v = 0; v < ZV; v++) {                  /* a silent voice, else the quietest let-go one, else the oldest */
-        uint32_t score = !zv[v].stage && zv[v].seen == zv[v].trig ? 0u       /* idle (also one the guard faded out) */
-                       : !zv[v].gate ? 1u + ((uint32_t)zv[v].env >> 3)
-                       : (zv[v].chord ? 0x40000000u : 0x80000000u) + (zv[v].age & 0x3FFFFFFFu);
-        if (score < best) { best = score; pick = v; }    /* (chord notes go before melody notes) */
-    }
-    z = &zv[pick];
-    z->gate = 0;
-    z->note = (uint8_t)note;
-    z->chord = (uint8_t)chord;
-    z->age = ++ages;
-    z->tag = ++tags;
-    z->velq = (int32_t)(vel * 258u);            /* Q15 */
-    z->press_t = 0;
-    z->from = (int32_t)(last_started << 20);    /* with GLIDE, from the last note played */
-    last_started = note;
-    z->gate = 1;
-    z->trig++;
-    ripple_start();
-    return z->tag;
+    zq_push(EV_ON, note, vel, chord, ++tags);
+    rec_capture(note);
+    return tags;
 }
 static void release_tag(uint32_t tag)
 {
-    uint32_t v;
-    if (!tag) return;
-    for (v = 0; v < ZV; v++)
-        if (zv[v].tag == tag) zv[v].gate = 0;
+    if (tag) zq_push(EV_OFF, 0, 0, 0, tag);
 }
-static int quiet(void)
+static int quiet(void)                         /* nothing sounding, nothing about to (a save stops the sound 50 ms) */
 {
     uint32_t v;
+    if (seq_on || arp_count || zq_w != zq_r) return 0;
     for (v = 0; v < ZV; v++)
         if (zv[v].gate || zv[v].stage) return 0;
     return 1;
@@ -267,6 +470,12 @@ static void chord_down(uint32_t d, int m7, int m9, int sus, int strum)
     last_chord = (int8_t)d;
 }
 
+static int strum_pending(void)
+{
+    uint32_t i;
+    for (i = 0; i < 12u; i++) if (pend[i].used) return 1;
+    return 0;
+}
 static void strum_tick(void)
 {
     uint32_t i;
@@ -309,6 +518,29 @@ static void percent(char *s, int32_t q)         /* Q10 -> "+35%", or "+0.6%" und
     zcat(s, "%");
 }
 
+/* the sequencer's editing state (the main loop's): the step being written, a step's notes as they are played, CLEAR */
+static uint32_t rec_on, rec_cur, rec_n, clr_count, clr_t;
+static uint8_t rec_buf[SEQ_V];
+static const char *const RATE_NAME[6] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
+static const char *const ARP_NAME[6] = {"OFF", "UP", "DOWN", "UP-DOWN", "RANDOM", "AS PLAYED"};
+static void rec_capture(uint32_t note)          /* recording: the notes of the step being played */
+{
+    uint32_t i;
+    if (!rec_on) return;
+    for (i = 0; i < rec_n; i++) if (rec_buf[i] == note) return;
+    if (rec_n < SEQ_V) rec_buf[rec_n++] = (uint8_t)note;
+}
+static int midi_held(const uint32_t *tag)
+{
+    uint32_t i;
+    for (i = 0; i < 128u; i++) if (tag[i]) return 1;
+    return 0;
+}
+static void pct(char *s, uint32_t k)            /* 0..127 -> "60%" */
+{
+    char t[8];
+    num(t, (int32_t)((k * 100u + 63u) / 127u)); zcat(s, t); zcat(s, "%");
+}
 static void value_text(uint32_t p, char *s)
 {
     static const char *const WAVE[4] = {"SAW", "SQUARE", "TRIANGLE", "SINE"};
@@ -340,6 +572,14 @@ static void value_text(uint32_t p, char *s)
     case P_MSRC: zcat(s, SRC_NAME[sl->src < ZS_N ? sl->src : 0]); break;
     case P_MDST: zcat(s, DST_NAME[sl->dst < ZD_N ? sl->dst : 0]); break;
     case P_MAMT: percent(s, sl->amt); break;
+    case P_ARPMODE: zcat(s, ARP_NAME[v > 5u ? 0u : v]); break;
+    case P_ARPRATE: case P_SRATE: zcat(s, RATE_NAME[v > 5u ? 3u : v]); break;
+    case P_ARPGATE: case P_SGATE: pct(s, v); break;
+    case P_BPM: if (set.p[P_SYNC]) zcat(s, "MIDI"); else num(s, (int32_t)v); break;
+    case P_HOLD: zcat(s, v ? "ON" : "OFF"); break;
+    case P_SYNC: zcat(s, v ? "MIDI CLOCK" : "INTERNAL"); break;
+    case P_SSTEP: num(s, (int32_t)rec_cur + 1); break;
+    case P_SCLEAR: zcat(s, fm1_ms - clr_t < 1500u ? "CLEARED" : clr_count ? "MORE" : "TURN >"); break;
     default: num(s, (int32_t)v);
     }
 }
@@ -371,7 +611,9 @@ static const char *const SHORT[P_N] = {"BLOOM", "MORPH", "ECHOES", "SPACE", "CUT
     "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "ATTACK", "DECAY", "SUSTAIN", "RELEASE",
     "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "1 RATE", "1 SHAPE", "2 RATE", "2 SHAPE",
     "RANDOM", "SMOOTH", "KEYTRK", "STEREO", "CHORUS", "REVERB", "DECAY", "SHIMMER", "SIZE", "DAMP", "DEPTH", "SPEAKER",
-    "TIME", "FEEDBK", "TONE", "MIX", "KEY", "SCALE", "KEYS", "SPREAD"};
+    "TIME", "FEEDBK", "TONE", "MIX", "KEY", "SCALE", "KEYS", "SPREAD", "MODE", "RATE", "OCTAVES", "GATE",
+    "BPM", "HOLD", "SYNC", "LENGTH", "RATE", "GATE"};
+static const char *const PSEUDO[6] = {"SLOT", "SOURCE", "DEST", "AMOUNT", "STEP", "CLEAR"};   /* P_MSLOT .. P_SCLEAR */
 static const char *const SRC_SHORT[ZS_N] = {"--", "ENV 1", "ENV 2", "LFO 1", "LFO 2", "RANDOM", "PRESS", "VEL",
     "WHEEL", "CH PRS", "BLOOM", "MORPH", "ECHOES", "SPACE", "KEY", "SLIDE"};
 static const char *const DST_SHORT[ZD_N] = {"--", "PITCH", "A TUNE", "A DET", "A SHAPE", "A LEVEL", "B POS",
@@ -404,6 +646,9 @@ static void value_short(uint32_t p, char *s)    /* a card's value: 7 characters 
     case P_MSLOT: num(s, (int32_t)mod_sel + 1); break;
     case P_MSRC: zcat(s, SRC_SHORT[sl->src < ZS_N ? sl->src : 0]); break;
     case P_MDST: zcat(s, DST_SHORT[sl->dst < ZD_N ? sl->dst : 0]); break;
+    case P_ARPMODE: { static const char *const A[6] = {"OFF", "UP", "DOWN", "UP-DN", "RANDOM", "PLAYED"};
+                      zcat(s, A[v > 5u ? 0u : v]); break; }
+    case P_SYNC: zcat(s, v ? "MIDI" : "INT"); break;
     default: value_text(p, s);
     }
 }
@@ -415,6 +660,8 @@ static uint32_t bar_of(uint32_t p)              /* a card's bar, 0..1024 */
     if (p == P_MSLOT) return mod_sel * 1024u / (ZM_NSLOTS - 1u);
     if (p == P_MSRC) return sl->src * 1024u / (ZS_N - 1u);
     if (p == P_MDST) return sl->dst * 1024u / (ZD_N - 1u);
+    if (p == P_SSTEP) return rec_cur * 1024u / (SEQ_N - 1u);
+    if (p == P_SCLEAR) return clr_count * 256u;
     a = sl->amt < 0 ? -sl->amt : sl->amt;
     return (uint32_t)a;
 }
@@ -596,7 +843,7 @@ static void ui_cards(uint32_t page, uint32_t hot)
         uint32_t p = page_param(page, r), c = page == PG_HOME ? PLATE_T[r] : T_BRASS;
         int32_t x = (int32_t)r * 60, bx0 = x + 9, bx1 = x + 51, w;
         char v[16];
-        const char *lab = p < P_N ? SHORT[p] : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT];
+        const char *lab = p < P_N ? SHORT[p] : PSEUDO[p - P_MSLOT];
         if (r) zb_rect(x, 6, 1, (int32_t)H_CARDS - 10, T_WALNUT, 256);
         zb_textc(x + 30, 11 - (int32_t)lf->h / 2, lf, lab, r == hot ? T_AMBER : T_BRASSLO, 1);
         value_short(p, v);
@@ -677,9 +924,14 @@ static void ui_mid(uint32_t page, uint32_t hot)
     if (hot < 4u) {
         uint32_t p = page_param(page, hot);
         char v[24];
-        zcat(s, p < P_N ? PARAM[p].name : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT]);
+        zcat(s, p < P_N ? PARAM[p].name : PSEUDO[p - P_MSLOT]);
         zcat(s, "   "); value_text(p, v); zcat(s, v);
         foot_c = T_BRASSHI;
+    } else if (page == PG_SEQ) {
+        char t[8];
+        if (rec_on) { zcat(s, "REC  step "); num(t, (int32_t)rec_cur + 1); zcat(s, t); zcat(s, ":  play it, or SEQ for a rest"); foot_c = 0xFF5A3Cu; }
+        else if (seq_on) { zcat(s, "playing   PLAY stops"); foot_c = T_AMBER; }
+        else { zcat(s, "PLAY plays   REC writes"); foot_c = T_STEEL; }
     } else if (set.p[P_KEYS]) { zcat(s, "chromatic keys"); foot_c = T_STEEL; }
     else if (last_chord >= 0) { zcat(s, chord_text); foot_c = T_AMBER; }
     else {
@@ -736,6 +988,31 @@ static void ui_mid(uint32_t page, uint32_t hot)
                 if (zv[i].stage) { zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 4, T_AMBER, 70); zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 2, T_GLOW, 256); }
                 else zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 2, 0x3A2414u, 256);
             }
+        } else if (page == PG_SEQ) {            /* the sequence: 16 steps, two rows of eight */
+            uint32_t len = set.p[P_SLEN], st;
+            for (st = 0; st < SEQ_N; st++) {
+                int32_t cx = 6 + (int32_t)(st % 8u) * 29, cy = 22 + (int32_t)(st / 8u) * 58;
+                uint32_t on = st < len, cnt = 0, j, lo = 0;
+                for (j = 0; j < SEQ_V; j++) if (set.seq[st][j]) { cnt++; if (!lo || set.seq[st][j] < lo) lo = set.seq[st][j]; }
+                zb_rect(cx, cy, 27, 48, T_WALNUTLO, on ? 235u : 110u);   /* a little plank */
+                zb_rect(cx, cy, 27, 1, T_WALNUT, on ? 256u : 120u); zb_rect(cx, cy + 47, 27, 1, T_WALNUT, on ? 256u : 120u);
+                zb_rect(cx, cy, 1, 48, T_WALNUT, on ? 256u : 120u); zb_rect(cx + 26, cy, 1, 48, T_WALNUT, on ? 256u : 120u);
+                if (seq_on && seq_now == st) zb_rect(cx, cy, 27, 48, T_AMBER, 110);
+                if (st == rec_cur && (rec_on || page == PG_SEQ)) {   /* the step being written: outlined */
+                    uint32_t c = rec_on ? 0xFF5A3Cu : T_BRASS;
+                    zb_rect(cx, cy, 27, 1, c, 256); zb_rect(cx, cy + 47, 27, 1, c, 256);
+                    zb_rect(cx, cy, 1, 48, c, 256); zb_rect(cx + 26, cy, 1, 48, c, 256);
+                }
+                if (cnt) {                      /* the lowest note's name and octave; a chord: how many more */
+                    char sn[8], t[6];
+                    sn[0] = 0;
+                    zcat(sn, znote_name((int)(lo % 12u), zkey_flats(set.p[P_KEY], set.p[P_SCALE])));
+                    num(t, (int32_t)lo / 12 - 1); zcat(sn, t);
+                    zb_textc(cx + 14, cy + 10, tf, sn, on ? T_BONE : T_WALNUT, 0);
+                    if (cnt > 1u) { t[0] = '+'; t[1] = (char)('0' + cnt - 1u); t[2] = 0;
+                                    zb_textc(cx + 14, cy + 28, &ZF_LAB, t, on ? T_AMBER : T_WALNUT, 0); }
+                } else zb_textc(cx + 14, cy + 14, tf, "-", on ? T_BRASSLO : T_WALNUTLO, 0);
+            }
         } else {                                /* the sound, burned across the wood */
             for (x = 1; x < SC_PTS; x++) {
                 zb_line((int32_t)x - 1, 78 - ys[x - 1] + 1, (int32_t)x, 78 - ys[x] + 1, T_AMBER, 80);
@@ -743,7 +1020,7 @@ static void ui_mid(uint32_t page, uint32_t hot)
                 zb_line((int32_t)x - 1, 78 - ys[x - 1], (int32_t)x, 78 - ys[x], T_GLOW, 230);
             }
         }
-        if (last_chord >= 0 && hot >= 4u && !set.p[P_KEYS] && page != PG_HOME)
+        if (last_chord >= 0 && hot >= 4u && !set.p[P_KEYS] && page != PG_HOME && page != PG_SEQ)
             zb_textc(120, foot_y - 6, nf, s, foot_c, 0);   /* a chord: in the serif */
         else
             zb_textc(120, foot_y, tf, s, foot_c, 0);
@@ -858,8 +1135,28 @@ static void app_main(void)
                         : b & (1u << BTN_ENV) ? (page >= PG_ENV && page < PG_ENV + 2u ? page + 1u : PG_ENV)
                         : b & (1u << BTN_LFO) ? (page >= PG_LFO && page < PG_LFO + 2u ? page + 1u : PG_LFO)
                         : b & (1u << BTN_FX) ? (page >= PG_FX && page < PG_FX + 2u ? page + 1u : PG_FX)
-                        : b & (1u << BTN_GLO) ? PG_GLO : page;
+                        : b & (1u << BTN_GLO) ? PG_GLO
+                        : b & (1u << BTN_ARP) ? (page == PG_ARP ? PG_ARP + 1u : PG_ARP)
+                        : b & (1u << BTN_SEQ) && !rec_on ? PG_SEQ : page;
             if (np != page) { page = np; hot = 9; draw_page(page); }
+        }
+        if (b & (1u << BTN_SEQ) && rec_on) {    /* recording: SEQ writes a rest */
+            memset(set.seq[rec_cur], 0, SEQ_V);
+            rec_cur = (rec_cur + 1u) % set.p[P_SLEN]; rec_n = 0;
+            dirty = 1; t_change = fm1_ms; mid_dirty = 1; ui_cards(page, hot);
+        }
+        if (b & (1u << BTN_PLAY)) { seq_req = seq_on ? 2u : 1u; mid_dirty = 1; }   /* PLAY: the sequence, from step 1 */
+        if (b & (1u << BTN_REC)) {              /* REC: step recording: keys (or a chord) write a step, SEQ a rest */
+            rec_on ^= 1u; rec_n = 0;
+            if (rec_on && page != PG_SEQ) { page = PG_SEQ; hot = 9; draw_page(page); }
+            mid_dirty = 1;
+        }
+        if (rec_on && rec_n && !keys && !strum_pending() && !midi_held(midi_tag)) {   /* all let go: the step */
+            memset(set.seq[rec_cur], 0, SEQ_V);
+            memcpy(set.seq[rec_cur], rec_buf, rec_n);
+            rec_cur = (rec_cur + 1u) % set.p[P_SLEN]; rec_n = 0;
+            dirty = 1; t_change = fm1_ms; mid_dirty = 1;
+            if (page == PG_SEQ) ui_cards(page, hot);
         }
         if (b & (1u << BTN_SEL)) {              /* SEL: scale keys <-> chromatic keys */
             set.p[P_KEYS] ^= 1u; dirty = 1; t_change = fm1_ms;
@@ -897,15 +1194,25 @@ static void app_main(void)
                 int32_t step = d > 0 ? 1 : -1, n = d > 0 ? d : -d, dd = sl->dst;
                 while (n--) do dd = (dd + step + (int32_t)ZD_N) % (int32_t)ZD_N; while (DST_SKIP(dd));
                 sl->dst = (uint8_t)dd;
+            } else if (p == P_SSTEP) {          /* the step the sequencer writes next */
+                nv = (int32_t)rec_cur + d;
+                rec_cur = (uint32_t)(nv < 0 ? 0 : nv >= (int32_t)set.p[P_SLEN] ? (int32_t)set.p[P_SLEN] - 1 : nv);
+            } else if (p == P_SCLEAR) {         /* CLEAR: four clicks to the right empty the sequence */
+                if (d < 0) clr_count = 0;
+                else if ((clr_count += (uint32_t)d) >= 4u) {
+                    memset(set.seq, 0, sizeof set.seq);
+                    clr_count = 0; clr_t = fm1_ms; rec_cur = 0;
+                }
             } else {                            /* AMOUNT: 1 % a click, 2 % fast */
                 nv = sl->amt + d * ((d > 1 || d < -1) ? 20 : 10);
                 sl->amt = (int16_t)(nv < -1024 ? -1024 : nv > 1024 ? 1024 : nv);
             }
+            if (p == P_SLEN && rec_cur >= set.p[P_SLEN]) rec_cur = set.p[P_SLEN] - 1u;
             apply();
             hot = k; t_hot = fm1_ms; mid_dirty = 1;
             ui_cards(page, hot);
             if (p >= P_KEY && p <= P_SPREAD) last_chord = -1;
-            if (p != P_MSLOT) { dirty = 1; t_change = fm1_ms; }
+            if (p != P_MSLOT && p != P_SSTEP) { dirty = 1; t_change = fm1_ms; }
         }
         if (hot < 4u && fm1_ms - t_hot > 1500u) { hot = 9; ui_cards(page, hot); mid_dirty = 1; }
 
@@ -914,9 +1221,15 @@ static void app_main(void)
             if (ty == 0x90u && d2) { release_tag(midi_tag[d1 & 127u]); midi_tag[d1 & 127u] = play(d1, d2, 0); }
             else if (ty == 0x80u || ty == 0x90u) { release_tag(midi_tag[d1 & 127u]); midi_tag[d1 & 127u] = 0; }
             else if (ty == 0xA0u) {             /* poly pressure: that note's PRESSURE */
-                for (k = 0; k < ZV; k++)
-                    if (midi_tag[d1 & 127u] && zv[k].tag == midi_tag[d1 & 127u]) zv[k].press_t = (int32_t)d2 * 258;
-            } else if (ty == 0xD0u) zm_chanat = (int32_t)d1 * 258;
+                if (midi_tag[d1 & 127u]) zq_push(EV_PRESS, 0, d2, 0, midi_tag[d1 & 127u]);
+            }
+#ifdef DINGHY_HOST
+            else if (st == 0xF8u) usb_clk.ticks++;   /* (on the FM-1 the USB interrupt counts these) */
+            else if (st == 0xFAu) usb_clk.starts++;
+            else if (st == 0xFBu) usb_clk.conts++;
+            else if (st == 0xFCu) usb_clk.stops++;
+#endif
+            else if (ty == 0xD0u) zm_chanat = (int32_t)d1 * 258;
             else if (ty == 0xE0u) zm_bend = ((int32_t)((uint32_t)d2 << 7 | d1) - 8192) / 4;   /* +-2 semitones */
             else if (ty == 0xB0u && d1 == 1u) zm_wheel = (int32_t)d2 * 258;
             else if (ty == 0xB0u && d1 == 74u) zm_slide = (int32_t)d2 * 258;
@@ -944,6 +1257,15 @@ static void app_main(void)
         fm1_led_key(BTN_GLO, page == PG_GLO);
         fm1_led_key(BTN_SEL, set.p[P_KEYS] != 0u);
         fm1_led_key(BTN_SAVE, !scope_on);
+        fm1_led_key(BTN_ARP, set.p[P_ARPMODE] != 0u);
+        fm1_led_key(BTN_SEQ, page == PG_SEQ);
+        fm1_led_key(BTN_PLAY, seq_on != 0u);
+        fm1_led_key(BTN_REC, rec_on != 0u);
+        {                                       /* the screen follows the interrupt: ripples, the step playing */
+            static uint32_t starts_seen, now_seen = 0xFFFFu;
+            if (zv_starts != starts_seen) { starts_seen = zv_starts; ripple_start(); }
+            if (seq_now != now_seen) { now_seen = seq_now; if (page == PG_SEQ) mid_dirty = 1; }
+        }
 
         if (fm1_ms - t_stat >= 250u || voices != voices_drawn) {     /* 4 times a second: CPU and limiter */
             uint32_t cpu = cpu_ticks_max * 100u / (5805u * FM1_TICKS_PER_US);

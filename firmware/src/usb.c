@@ -124,6 +124,8 @@ static struct {
 #endif
 #endif
 
+static volatile struct { uint32_t ticks, starts, conts, stops; } usb_clk;   /* MIDI clock and transport, counted */
+
 static struct {
     uint8_t up, config, pend_addr, has_pend_addr, e0_tx, e0_zlp;
     const uint8_t *e0_src;
@@ -744,6 +746,10 @@ static void midi_in_event(uint32_t pkt)
 #endif
     }
     if (cin == 0xFu && (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu)) {   /* clock, transport */
+        if (st == 0xF8u) usb_clk.ticks++;       /* counted here too: the app's audio interrupt reads them, */
+        else if (st == 0xFAu) usb_clk.starts++; /* on time (the ring waits for the main loop) */
+        else if (st == 0xFBu) usb_clk.conts++;
+        else usb_clk.stops++;
         if (mi_w - mi_r < MQ) {
             midi_in_q[mi_w % MQ] = 0xFu | st << 8;
             RING_PUBLISH();

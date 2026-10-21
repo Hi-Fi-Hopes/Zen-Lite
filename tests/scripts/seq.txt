@@ -1,0 +1,16 @@
+100 btn 13
+300 keys 0x1
+450 keys 0
+600 keys 0x4
+750 keys 0
+900 btn 11
+1100 keys 0x2
+1250 keys 0
+1300 shot
+1400 btn 13
+1500 enc 3 -12
+1600 shot
+1900 btn 12
+2400 shot
+3700 btn 12
+4300 end
