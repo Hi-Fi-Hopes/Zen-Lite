@@ -348,6 +348,7 @@ static void value_text(uint32_t p, char *s)
 #define H_SCOPE 124u
 #define Y_CARDS 146u
 #define H_CARDS 94u
+#define STRIP 64u                               /* the canvas: 240 x 64 at most (platform.c CV_MAX) */
 #define ZC_EDGE RGB(74, 56, 30)                 /* the rules */
 #define ZC_WAVE RGB(255, 196, 92)
 #define ZC_GLOW RGB(110, 70, 22)
@@ -428,8 +429,10 @@ static void ui_header(uint32_t page)
 /* the cards: knob 1-4, left to right; the one being turned is lit */
 static void ui_cards(uint32_t page, uint32_t hot)
 {
-    uint32_t r;
-    cv_begin(240, H_CARDS, C_BLACK);
+    uint32_t r, r0;
+    for (r0 = 0; r0 < H_CARDS; r0 += STRIP) {  /* in strips: the canvas holds 64 rows */
+    cv_begin(240, H_CARDS - r0 > STRIP ? STRIP : H_CARDS - r0, C_BLACK);
+    cv_oy = -(int32_t)r0;
     for (r = 0; r < 4u; r++) {
         uint32_t p = page_param(page, r), w;
         int32_t x = (int32_t)r * 60, tw;
@@ -446,7 +449,9 @@ static void ui_cards(uint32_t page, uint32_t hot)
         cv_rect(x + 6, 74, 48, 3, ZC_EDGE);
         cv_rect(x + 6, 74, (int32_t)w, 3, c);
     }
-    cv_blit(0, Y_CARDS);
+    cv_blit(0, Y_CARDS + r0);
+    }
+    cv_oy = 0;
 }
 
 /* the scope: the last 1024 samples of the output (the audio interrupt writes them); a rising zero crossing holds
@@ -455,9 +460,10 @@ static int32_t sc_peak = 4096;
 static void ui_scope(uint32_t page, uint32_t hot)
 {
     static int16_t snap[SC_N];
-    uint32_t w = sc_w, i, t0 = 0, x;
-    int32_t pk = 0, g, prev = 0, mid, half;
-    char s[40];
+    static int16_t ys[240];
+    uint32_t w = sc_w, i, t0 = 0, x, r0;
+    int32_t pk = 0, g, mid, half;
+    char s[40], num_s[16];
     for (i = 0; i < SC_N; i++) {
         snap[i] = sc_ring[(w + i) & (SC_N - 1u)];
         if (snap[i] > pk) pk = snap[i];
@@ -472,26 +478,14 @@ static void ui_scope(uint32_t page, uint32_t hot)
     g = (half << 16) / sc_peak;                 /* px per sample unit, Q16: the peak at the band's edge */
     for (i = 1; i < SC_N - 480u; i++)           /* the first rising zero crossing */
         if (snap[i - 1] < 0 && snap[i] >= 0) { t0 = i; break; }
-    cv_begin(240, H_SCOPE, C_BLACK);
-    cv_rect(0, mid, 240, 1, ZC_EDGE);
     for (x = 0; x < 240u; x++) {
-        int32_t a = (snap[t0 + 2u * x] + snap[t0 + 2u * x + 1u]) >> 1;
-        int32_t y = mid - ((a * g) >> 16);
-        y = y < mid - half ? mid - half : y > mid + half ? mid + half : y;
-        if (x) {
-            cv_line((int32_t)x - 1, prev + 1, (int32_t)x, y + 1, ZC_GLOW);
-            cv_line((int32_t)x - 1, prev, (int32_t)x, y, ZC_WAVE);
-        }
-        prev = y;
+        int32_t a = (snap[t0 + 2u * x] + snap[t0 + 2u * x + 1u]) >> 1, y = mid - ((a * g) >> 16);
+        ys[x] = (int16_t)(y < mid - half ? mid - half : y > mid + half ? mid + half : y);
     }
-    if (page == PG_HOME) {                      /* the preset, and where it is in the list */
-        const char *nm = ZPRESET[set.preset % ZPRESETS].name;
+    num_s[0] = 0;
+    {
         char t[12];
-        if (text_w(&FONT_L, nm) <= 232) cv_text((240 - text_w(&FONT_L, nm)) / 2, 4, &FONT_L, nm, ZC_BRASS);
-        else cv_text((240 - text_w(&FONT_S, nm)) / 2, 12, &FONT_S, nm, ZC_BRASS);
-        s[0] = 0;
-        num(t, (int32_t)set.preset); zcat(s, t); zcat(s, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(s, t);
-        cv_text((240 - text_w(&FONT_S, s)) / 2, 36, &FONT_S, s, ZC_DIM);
+        num(t, (int32_t)set.preset); zcat(num_s, t); zcat(num_s, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(num_s, t);
     }
     s[0] = 0;                                   /* the foot: the knob being turned, else the chord, else the key */
     if (hot < 4u) {
@@ -508,9 +502,25 @@ static void ui_scope(uint32_t page, uint32_t hot)
     }
     if (set.oct) { char t[8] = "  OCT +"; t[6] = set.oct < 0 ? '-' : '+'; t[7] = 0; zcat(s, t);
                    t[0] = (char)('0' + (set.oct < 0 ? -set.oct : set.oct)); t[1] = 0; zcat(s, t); }
-    cv_text((240 - text_w(&FONT_S, s)) / 2, (int32_t)H_SCOPE - 20, &FONT_S, s,
-            hot < 4u ? ZC_BONE : last_chord >= 0 && !set.p[P_KEYS] ? ZC_AMBER : ZC_DIM);
-    cv_blit(0, Y_SCOPE);
+    for (r0 = 0; r0 < H_SCOPE; r0 += STRIP) {  /* in strips: the canvas holds 64 rows */
+        cv_begin(240, H_SCOPE - r0 > STRIP ? STRIP : H_SCOPE - r0, C_BLACK);
+        cv_oy = -(int32_t)r0;
+        cv_rect(0, mid, 240, 1, ZC_EDGE);
+        for (x = 1; x < 240u; x++) {
+            cv_line((int32_t)x - 1, ys[x - 1] + 1, (int32_t)x, ys[x] + 1, ZC_GLOW);
+            cv_line((int32_t)x - 1, ys[x - 1], (int32_t)x, ys[x], ZC_WAVE);
+        }
+        if (page == PG_HOME) {                  /* the preset, and where it is in the list */
+            const char *nm = ZPRESET[set.preset % ZPRESETS].name;
+            if (text_w(&FONT_L, nm) <= 232) cv_text((240 - text_w(&FONT_L, nm)) / 2, 4, &FONT_L, nm, ZC_BRASS);
+            else cv_text((240 - text_w(&FONT_S, nm)) / 2, 12, &FONT_S, nm, ZC_BRASS);
+            cv_text((240 - text_w(&FONT_S, num_s)) / 2, 36, &FONT_S, num_s, ZC_DIM);
+        }
+        cv_text((240 - text_w(&FONT_S, s)) / 2, (int32_t)H_SCOPE - 20, &FONT_S, s,
+                hot < 4u ? ZC_BONE : last_chord >= 0 && !set.p[P_KEYS] ? ZC_AMBER : ZC_DIM);
+        cv_blit(0, Y_SCOPE + r0);
+    }
+    cv_oy = 0;
 }
 
 static void draw_page(uint32_t page)

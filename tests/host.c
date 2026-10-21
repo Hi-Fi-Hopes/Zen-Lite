@@ -53,7 +53,7 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
                 fb[(y + j) * 240u + x + i] = (uint16_t)(c >> 8 | c << 8);
             }
 }
-#define CV_MAX (240u * 124u)                    /* as the FM-1 (gfx.c) */
+#define CV_MAX (240u * 64u)                     /* as the FM-1 (platform.c): 64 rows at a time */
 #include "gfx.c"
 
 static uint8_t host_store[256 + 4];
