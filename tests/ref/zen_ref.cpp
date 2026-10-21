@@ -2,7 +2,8 @@
 // The reference: the real Zenthesizer engine (float, from the plugin's source) playing the same patch and
 // the same notes as a Zen-Lite host script, so the two WAVs can be compared (tests/compare.py).
 //   c++ -std=c++17 -O2 -I$ZEN_SRC/Source tests/ref/zen_ref.cpp -o build/host/zen_ref
-//   build/host/zen_ref script.txt out.wav POS CUT RES REL      (knobs 0..127, as Zen-Lite's)
+//   build/host/zen_ref script.txt out.wav NAME=V ...      (Zen-Lite's knobs, 0..127: CUT RES POS MIX WAVE SHAPE
+//                                                          DET TUNE ATT DEC SUS REL; unset ones take Zen-Lite's defaults)
 #include "dsp/Engine.h"
 #include <cstdio>
 #include <cstring>
@@ -13,15 +14,25 @@ using namespace zen;
 
 int main (int argc, char** argv)
 {
-    if (argc < 7) { std::fprintf (stderr, "usage: zen_ref script out.wav POS CUT RES REL\n"); return 1; }
+    if (argc < 3) { std::fprintf (stderr, "usage: zen_ref script out.wav NAME=V ...\n"); return 1; }
     const float fs = 44100.0f;
     Engine eng; eng.prepare (fs);
     Settings s; s.padNotes.fill (-1);           // no pads: every note is a key (notes 36-51 would be the plates)
-    s.aLevel = 0.0f; s.bLevel = 1.0f; s.bTable = 1; s.bUnison = 0.0f; s.bWarp = 0.0f; s.air = 0.0f;
-    s.bPos = std::atoi (argv[3]) / 127.0f; s.cutoff = std::atoi (argv[4]) / 127.0f;
-    s.res = std::atoi (argv[5]) / 127.0f; s.ampR = std::atoi (argv[6]) / 127.0f;
+    // Zen-Lite's knob defaults, then the ones given; each knob maps exactly as the firmware maps it (k * 1024 / 127)
+    struct { const char* n; int v; } k[] = { {"CUT",79},{"RES",38},{"POS",57},{"MIX",64},{"WAVE",0},{"SHAPE",0},{"DET",25},
+                                             {"TUNE",24},{"ATT",38},{"DEC",64},{"SUS",102},{"REL",76} };
+    for (int a = 3; a < argc; ++a)
+        for (auto& e : k)
+            if (! std::strncmp (argv[a], e.n, std::strlen (e.n)) && argv[a][std::strlen (e.n)] == '=') e.v = std::atoi (argv[a] + std::strlen (e.n) + 1);
+    auto kv = [&] (const char* n) { for (auto& e : k) if (! std::strcmp (e.n, n)) return e.v; return 0; };
+    auto q = [&] (const char* n) { return (float) (kv (n) * 1024 / 127) / 1024.0f; };
+    const float mix = q ("MIX");
+    s.aLevel = std::min (1.0f, (1.0f - mix) * 2.0f); s.bLevel = std::min (1.0f, mix * 2.0f);
+    s.aWave = (WaveA) kv ("WAVE"); s.aShape = q ("SHAPE"); s.aDetune = q ("DET"); s.aTune = 0.5f + (kv ("TUNE") - 24) / 48.0f;
+    s.bTable = 1; s.bUnison = 0.0f; s.bWarp = 0.0f; s.air = 0.0f;
+    s.bPos = q ("POS"); s.cutoff = q ("CUT"); s.res = q ("RES");
     s.drive = 0.0f; s.envAmt = 0.5f; s.keyTrack = 0.5f;
-    s.ampA = 300.0f / 1024.0f; s.ampD = 0.5f; s.ampS = 0.8f;
+    s.ampA = q ("ATT"); s.ampD = q ("DEC"); s.ampS = q ("SUS"); s.ampR = q ("REL");
     s.spread = 0.5f; s.volume = 0.857f; s.velSens = 0.5f;
     s.chorusMix = 0.0f; s.delayMix = 0.0f; s.reverbMix = 0.0f; s.glide = 0.0f;
 

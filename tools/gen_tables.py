@@ -75,6 +75,16 @@ def main():
         env_a.append(q(1 - math.exp(-1.466 / (t * FS)), 30))
         env_dr.append(q(1 - math.exp(-4.6 / (t * FS)), 30))
 
+    sin_t = [q(math.sin(2 * math.pi * i / 1024), 15) for i in range(1025)]
+    sin_t = [max(-32767, min(32767, v)) for v in sin_t]
+
+    det = []                               # Engine A DETUNE knob (Q10) -> the side oscillators (Engine.h)
+    for i in range(1025):
+        d = i / 1024
+        cents = d ** 1.5 * 38.0
+        side = min(1.0, d * 5.0)
+        det += [q(2 ** (-cents / 1200), 30), q(2 ** (cents / 1200 * 1.07), 30), q(side, 15), q(1 / (1 + side * 1.2), 15)]
+
     voice_pan = [-0.15, 0.15, -0.45, 0.45, -0.3, 0.3, -0.6, 0.6]       # Engine.h, times spread 0.5
     pan = []
     for p in voice_pan:
@@ -103,6 +113,11 @@ def main():
     arr("ZT_G", "int32_t", gtab)
     arr("ZT_ENV_A", "int32_t", env_a)
     arr("ZT_ENV_DR", "int32_t", env_dr)
+    arr("ZT_SIN", "int16_t", sin_t)
+    L.append("static const int32_t ZT_DET[1025][4] = {")
+    for i in range(0, len(det), 4):
+        L.append("  {" + ",".join(map(str, det[i:i + 4])) + "},")
+    L.append("};")
     L.append("static const int16_t ZT_PAN[8][2] = {" + ",".join(f"{{{a},{b}}}" for a, b in pan) + "};")
     L.append("#endif")
     out = Path(__file__).resolve().parent.parent / "firmware" / "gen" / "zen_tables.h"
