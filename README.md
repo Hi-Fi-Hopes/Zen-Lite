@@ -87,6 +87,8 @@ After the mock-ups, in Zenthesizer's theme and its fonts (Instrument Serif Itali
 - Along the top a plank with the page's name and the CPU (and the limiter and DROP when they act); along the bottom
   a plank of four cards, one a knob: name, value, bar. Turning a knob lights its card and spells it out in full.
 - **SAVE** stops the motion (a still picture) and starts it again.
+- **The battery** at the top plank's right end: stock's four levels (0-3 bars, amber at one and none), a bolt
+  while a computer is connected over USB.
 
 The pictures and fonts are drawn once on a computer (`tools/gen_art.py`) and stored in the firmware (about 80 KB).
 The screen is drawn between audio blocks, from the main loop, and only while something moves or changes; the sound's

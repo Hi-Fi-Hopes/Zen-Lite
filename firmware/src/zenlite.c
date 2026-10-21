@@ -509,6 +509,44 @@ static void zb_disc(int32_t cx, int32_t cy, int32_t r, uint32_t c, uint32_t a)  
         }
 }
 
+/* ---- the battery: the divider on ADC channel 3, averaged; stock's four levels (the thresholds Melodee uses:
+ * 531 / 561 / 591), with a little hysteresis so it doesn't flicker between two. On USB (a computer that has set the
+ * FM-1 up, not asleep) a bolt instead. */
+static int32_t batt_raw;                        /* 0: not read yet */
+static uint32_t batt_lv = 3;
+#ifdef DINGHY_HOST
+static int32_t host_batt = 600;                 /* the host tests pretend ("T batt RAW") */
+static int32_t batt_read(void) { return host_batt; }
+static void host_set_batt(int raw) { host_batt = raw; batt_raw = raw; }
+static int batt_usb(void) { return 0; }
+#else
+static int32_t batt_read(void) { return fm1_adc_read(FM1_ADC_BATT); }
+static int batt_usb(void) { return usb.config == 1u && !usb.suspended; }
+#endif
+static void batt_poll(void)                     /* the main loop, twice a second */
+{
+    static const int32_t TH[3] = {531, 561, 591};
+    int32_t b = batt_read();
+    uint32_t want = 0;
+    if (b <= 0) return;
+    batt_raw = batt_raw ? batt_raw + (b - batt_raw) / 8 : b;
+    while (want < 3u && batt_raw >= TH[want]) want++;
+    if (want > batt_lv && batt_raw >= TH[batt_lv] + 4) batt_lv = want;       /* up: 4 counts past the line */
+    else if (want < batt_lv && batt_raw < TH[batt_lv - 1u] - 4) batt_lv = want;   /* down: 4 counts under it */
+}
+static void batt_draw(int32_t x, int32_t y)    /* 22 x 10, at the top plank's right end */
+{
+    uint32_t k, low = !batt_usb() && batt_lv <= 1u, c = low ? T_AMBER : T_BRASS;
+    zb_rect(x, y, 19, 1, c, 256); zb_rect(x, y + 9, 19, 1, c, 256);
+    zb_rect(x, y, 1, 10, c, 256); zb_rect(x + 18, y, 1, 10, c, 256);
+    zb_rect(x + 19, y + 3, 2, 4, c, 256);       /* the nub */
+    if (batt_usb()) {                           /* a bolt */
+        zb_line(x + 10, y + 2, x + 7, y + 5, T_BONE, 256); zb_line(x + 7, y + 5, x + 11, y + 5, T_BONE, 256);
+        zb_line(x + 11, y + 5, x + 8, y + 8, T_BONE, 256);
+    } else
+        for (k = 0; k < batt_lv; k++) zb_rect(x + 2 + (int32_t)k * 5, y + 2, 4, 6, low ? T_AMBER : T_BONE, 256);
+}
+
 /* ---- the header: a plank; the page's name in brass capitals; HOME: the preset's family and number; the rest:
  * the limiter (when it works), DROP (the guard), CPU */
 static uint32_t ui_cpu, ui_drop;
@@ -531,7 +569,7 @@ static void ui_header(uint32_t page)
         u[i] = 0;
         zb_textc(120, 10 - (int32_t)lf->h / 2, lf, u, T_STEEL, 1);
         num(t, (int32_t)set.preset); zcat(r, t); zcat(r, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(r, t);
-        zb_text(232 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, T_STEEL, 0);
+        zb_text(206 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, T_STEEL, 0);
     } else {
         if (ui_lim > 0) {
             zcat(r, "-"); num(t, ui_lim / 10); zcat(r, t); zcat(r, "."); t[0] = (char)('0' + ui_lim % 10); t[1] = 0;
@@ -539,8 +577,9 @@ static void ui_header(uint32_t page)
         }
         if (ui_drop) zcat(r, "DROP   ");
         zcat(r, "CPU "); num(t, (int32_t)ui_cpu); zcat(r, t); zcat(r, "%");
-        zb_text(232 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, ui_drop || ui_cpu > 75u ? T_AMBER : T_STEEL, 0);
+        zb_text(206 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, ui_drop || ui_cpu > 75u ? T_AMBER : T_STEEL, 0);
     }
+    batt_draw(212, 5);
     cv_blit(0, 0);
 }
 
@@ -916,6 +955,10 @@ static void app_main(void)
                 if (guard_drops != drops_seen) { drops_seen = guard_drops; t_drop = fm1_ms; }
                 ui_cpu = cpu; ui_lim = lim_db_tenths(g); ui_drop = fm1_ms - t_drop < 2000u;
                 ui_header(page);
+            }
+            {
+                static uint32_t n;
+                if (!(n++ & 1u)) batt_poll();   /* twice a second */
             }
             t_stat = fm1_ms;
             if (voices != voices_drawn || page == PG_HOME) mid_dirty = 1;   /* the beads; HOME's CPU */

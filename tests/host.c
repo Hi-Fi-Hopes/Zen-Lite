@@ -85,10 +85,12 @@ static void midi_send(uint32_t st, uint32_t d1, uint32_t d2) { printf("%6u ms  M
 static void app_audio(int32_t *out, uint32_t n);
 static void app_main(void);
 static void host_set_load(int on);              /* the app's (zenlite.c): pretend overload */
+static void host_set_batt(int raw);             /* the app's: pretend battery reading (ADC counts) */
 
 /* the script: at t ms, keys down (bit k = key k, 0 = F3), a button edge, a MIDI message. A script file (the second
  * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2",
- * "T enc ID DELTA" (turn encoder ID by DELTA detents), "T shot" (the screen as it is then), "T load 0|1" (tell the
+ * "T enc ID DELTA" (turn encoder ID by DELTA detents), "T shot" (the screen as it is then), "T batt RAW" (the battery's
+ * ADC reading), "T load 0|1" (tell the
  * app the FM-1 is overloaded: it reads host_load), "T end" */
 typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int enc, delta; } host_ev_t;
 static const host_ev_t SCRIPT0[] = {
@@ -121,6 +123,7 @@ static void read_script(const char *path)
         else if (!strcmp(what, "btn")) { sscanf(line, "%*u %*s %d", &e.btn); }
         else if (!strcmp(what, "shot")) { e.btn = -2; }
         else if (!strcmp(what, "load")) { int l = 0; sscanf(line, "%*u %*s %d", &l); e.btn = l ? -3 : -4; }
+        else if (!strcmp(what, "batt")) { int l = 0; sscanf(line, "%*u %*s %d", &l); e.btn = -5; e.delta = l; }
         else if (!strcmp(what, "enc")) { sscanf(line, "%*u %*s %d %d", &e.enc, &e.delta); }
         else if (!strcmp(what, "midi")) { sscanf(line, "%*u %*s %i %u %u", (int *)&a, &b, &c); e.st = (uint8_t)a; e.d1 = (uint8_t)b; e.d2 = (uint8_t)c; }
         else continue;
@@ -182,6 +185,8 @@ static void platform_poll(void)                 /* one call = one millisecond */
             write_ppm(fm1_ms);
         else if (script[step].btn == -3 || script[step].btn == -4)
             host_set_load(script[step].btn == -3);
+        else if (script[step].btn == -5)
+            host_set_batt(script[step].delta);
         else if (script[step].delta && script[step].enc >= 0 && script[step].enc < 8)
             host_enc[script[step].enc] += script[step].delta;
         else if (script[step].st) {
