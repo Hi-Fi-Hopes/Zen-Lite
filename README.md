@@ -33,7 +33,7 @@ scale on the white keys, mod envelopes and LFOs, the FX, presets.
 
 Chrome or Edge, the FM-1 on USB, Ableton and other MIDI apps closed.
 
-1. Download `zenlite.fwsc` from the latest build (Actions, the newest run, Artifacts: `zenlite`).
+1. Download `zenlite.fwsc` from the [`builds` branch](../../tree/builds) (the newest build of `main`).
 2. Install it with any FM-1 web installer that takes a package file, or from a terminal:
    `python3 tools/fm1_install.py zenlite.fwsc` (`pip3 install mido python-rtmidi` once).
 3. Play. Watch CPU on the screen with all six voices sounding.

@@ -7,6 +7,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   firmware:
     runs-on: ubuntu-22.04
@@ -64,12 +67,16 @@ jobs:
           git diff --exit-code firmware/gen/zen_tables.h
 
       - name: Build the FM-1 package
-        run: AC79_SDK=~/ac79sdk ./build.sh
+        run: |
+          VER=$(cat VERSION)
+          AC79_SDK=~/ac79sdk ./build.sh --release "$VER" | tee build-report.txt
+          cp "build/zenlite-$VER.fwsc" build/zenlite.fwsc
+          sha256sum build/zenlite.fwsc | tee -a build-report.txt
 
       - name: Play it on the host and compare with the plugin
         run: |
           sh tests/run_host.sh
-          ZEN_SRC=zenthesizer sh tests/check_audio.sh
+          ZEN_SRC=zenthesizer sh tests/check_audio.sh | tee -a build-report.txt
           cc -O2 -DDINGHY_HOST -DAPP_VER='"ci"' -Ifirmware/src -Ifirmware/gen -o build/host/zl_demo firmware/src/zenlite.c
           build/host/zl_demo build/host/demo tests/scripts/demo.txt > /dev/null
 
@@ -80,3 +87,14 @@ jobs:
             build/zenlite.fwsc
             build/host/demo.wav
             build/host/*.png
+
+      - name: Publish the package to the builds branch
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir out
+          cp build/zenlite.fwsc build/host/demo.wav build-report.txt out/
+          cd out
+          git init -q -b builds
+          git add .
+          git -c user.name=zen-lite-ci -c user.email=ci@users.noreply.github.com commit -q -m "build of ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" builds
