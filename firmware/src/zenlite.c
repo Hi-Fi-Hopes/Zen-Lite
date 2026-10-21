@@ -123,7 +123,7 @@ static int host_load;                           /* the host tests pretend the FM
 static void host_set_load(int on) { host_load = on; }
 #endif
 
-static void app_audio(int32_t *out, uint32_t n)
+ZFAST static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t i, v;
     int32_t vol = zl_vol;
@@ -523,11 +523,12 @@ static void ui_scope(uint32_t page, uint32_t hot)
     cv_oy = 0;
 }
 
+static uint32_t scope_on = 1;
 static void draw_page(uint32_t page)
 {
     ui_header(page);
     ui_cards(page, 9);
-    ui_scope(page, 9);
+    if (scope_on) ui_scope(page, 9);
 }
 
 static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenths of a dB (0.1 dB = x 0.98855) */
@@ -682,7 +683,17 @@ static void app_main(void)
             else if (ty == 0xB0u && d1 == 74u) zm_slide = (int32_t)d2 * 258;
         }
 
-        if (fm1_ms - t_scope >= 66u) { ui_scope(page, hot); t_scope = fm1_ms; }   /* the scope, 15 times a second */
+        if (b & (1u << BTN_SAVE)) {             /* SAVE: the scope off and on (to see what the screen costs) */
+            scope_on ^= 1u;
+            if (!scope_on) {
+                cv_begin(240, STRIP, C_BLACK);
+                cv_text((240 - text_w(&FONT_S, "SCOPE OFF   SAVE: ON")) / 2, 24, &FONT_S, "SCOPE OFF   SAVE: ON", ZC_DIM);
+                cv_blit(0, Y_SCOPE);
+                cv_begin(240, H_SCOPE - STRIP, C_BLACK);
+                cv_blit(0, Y_SCOPE + STRIP);
+            }
+        }
+        if (scope_on && fm1_ms - t_scope >= 66u) { ui_scope(page, hot); t_scope = fm1_ms; }   /* 15 times a second */
         lit = keys;
         for (k = 0; k < ZV; k++) if (zv[k].stage) voices++;
         for (k = 0; k < 27u; k++)
@@ -696,6 +707,7 @@ static void app_main(void)
         fm1_led_key(BTN_FX, page >= PG_FX && page < PG_GLO);
         fm1_led_key(BTN_GLO, page == PG_GLO);
         fm1_led_key(BTN_SEL, set.p[P_KEYS] != 0u);
+        fm1_led_key(BTN_SAVE, !scope_on);
 
         if (fm1_ms - t_stat >= 250u || voices != voices_drawn) {     /* 4 times a second: CPU and limiter */
             uint32_t cpu = cpu_ticks_max * 100u / (5805u * FM1_TICKS_PER_US);

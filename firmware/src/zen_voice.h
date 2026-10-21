@@ -17,6 +17,13 @@
 #define ZEN_VOICE_H
 #include "zen_tables.h"
 
+/* the audio code runs from RAM on the FM-1 (app.ld .fast_text), out of reach of what the screen does to the flash cache */
+#ifdef DINGHY_HOST
+#define ZFAST
+#else
+#define ZFAST __attribute__((section(".fast_text")))
+#endif
+
 #define ZV 6u                                   /* voices */
 #define ZBLK 16u                                /* control rate: coefficients every 16 frames (0.36 ms) */
 #define ONE30 (1 << 30)
@@ -72,13 +79,13 @@ static uint32_t zrand = 0x1234567u;
 static const uint32_t ZINC_C9[12] = {           /* MIDI 120..131 (C9..B9); lower octaves shift right */
     815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
     1153098554u, 1221665363u, 1294309365u, 1371273005u, 1452813141u, 1539201906u};
-static uint32_t zinc(int note)                  /* a MIDI note's phase step */
+ZFAST static uint32_t zinc(int note)                  /* a MIDI note's phase step */
 {
     if (note < 0) note = 0;
     if (note > 131) note = 131;
     return ZINC_C9[note % 12] >> (10 - note / 12);
 }
-static uint32_t zinc_q(int32_t s)               /* a pitch in semitones Q10 -> phase step (<= 0.45 fs) */
+ZFAST static uint32_t zinc_q(int32_t s)               /* a pitch in semitones Q10 -> phase step (<= 0.45 fs) */
 {
     uint32_t x, i, r, base;
     int32_t e;
@@ -128,7 +135,7 @@ static inline __attribute__((always_inline)) int32_t zblep(uint32_t t, uint32_t 
 
 /* one of Engine A's oscillators for a block of ZBLK frames (AnalogOsc::process), added into out[] at gain g (Q15).
  * The wave is chosen once a block, so each loop below is straight-line work. */
-static void zosc_block(int32_t wave, uint32_t *php, uint32_t inc, uint32_t dt, uint32_t invdt, int32_t shape,
+ZFAST static void zosc_block(int32_t wave, uint32_t *php, uint32_t inc, uint32_t dt, uint32_t invdt, int32_t shape,
                        int32_t pw, int32_t foldm, int32_t foldk, int32_t kfm, int32_t *fbp, int32_t *out, int32_t g)
 {
     uint32_t ph = *php, i;
@@ -183,7 +190,7 @@ static volatile int32_t lim_min_seen = ONE30;   /* the deepest gain since the sc
 #define LIM_ATT 126181474                       /* (1 - exp(-8/64)) Q30 */
 #define LIM_REL 1073579434                      /* exp(-1 / (0.15 * 44100)) Q30 */
 
-static void limiter(int32_t *L, int32_t *R, uint32_t n)
+ZFAST static void limiter(int32_t *L, int32_t *R, uint32_t n)
 {
     static int ready;
     uint32_t i, j;
@@ -222,7 +229,7 @@ static void limiter(int32_t *L, int32_t *R, uint32_t n)
 
 /* ---- the CPU guard: when a block took too long, fade one voice out (a let-go tail first, the quietest; then the
  * oldest chord note; then the oldest note). Returns 1 if it found one. Runs in the audio interrupt. */
-static uint32_t zguard_shed(void)
+ZFAST static uint32_t zguard_shed(void)
 {
     uint32_t v, pick = ZV, best = 0xFFFFFFFFu;
     for (v = 0; v < ZV; v++) {
@@ -240,7 +247,7 @@ static uint32_t zguard_shed(void)
 /* ---- the modulation of the global destinations (LFO rates, effect mixes): from the global sources, and the newest
  * voice for the per-voice ones (Engine.h controlTick). Once per audio block, before zm_block. */
 static const int16_t ZV_PAN[ZV] = {-154, 154, -461, 461, -307, 307};   /* Engine.h voicePan, Q10 */
-static int32_t zv_src(const zvoice_t *v, uint32_t s, uint32_t sb)    /* a source for one voice, Q15 */
+ZFAST static int32_t zv_src(const zvoice_t *v, uint32_t s, uint32_t sb)    /* a source for one voice, Q15 */
 {
     int32_t k;
     switch (s) {
@@ -254,7 +261,7 @@ static int32_t zv_src(const zvoice_t *v, uint32_t s, uint32_t sb)    /* a source
     default: return zm_gsrc(s, sb);
     }
 }
-static void zm_global(void)
+ZFAST static void zm_global(void)
 {
     uint32_t v, k, best = 0;
     const zvoice_t *nv = 0;
@@ -267,10 +274,10 @@ static void zm_global(void)
     }
 }
 
-static int32_t zclamp(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
+ZFAST static int32_t zclamp(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
 
 /* ---- one voice, n frames (n a multiple of ZBLK; ZSUB blocks at most), added into mixL / mixR (Q15) */
-static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
+ZFAST static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
 {
     zvoice_t *v = &zv[vi];
     uint32_t b, i, ph, pa0, pa1, pa2, j;

@@ -23,7 +23,7 @@ static volatile int32_t zf_chorus = 0, zf_depth = 64, zf_reverb = 0, zf_decay = 
 static volatile int32_t zf_size = 76, zf_damp = 64, zf_tone = 0;
 static volatile int32_t zf_dtime = 57, zf_dfb = 44, zf_dtone = 64, zf_delay = 0;
 static int32_t zf_cmod, zf_dmod, zf_rmod;       /* the mixes' modulation (the slots' CHORUS, DELAY, REVERB), Q15 */
-static int32_t zf_mix(int32_t knob, int32_t mod)   /* a knob (0..127) and its modulation -> a mix, Q15 */
+ZFAST static int32_t zf_mix(int32_t knob, int32_t mod)   /* a knob (0..127) and its modulation -> a mix, Q15 */
 {
     int32_t m = knob * 258 + mod;
     return m < 0 ? 0 : m > 32767 ? 32767 : m;
@@ -36,14 +36,14 @@ static uint32_t ch_w, ch_ph;
 static int32_t ch_mix_prev;
 #define CH_INC 23563u                           /* rate 0.3: 0.08 x 40^0.3 = 0.242 Hz, as a phase step */
 
-static int32_t ch_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), linear between the two neighbours */
+ZFAST static int32_t ch_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), linear between the two neighbours */
 {
     uint32_t i0 = (ch_w - 1u - (uint32_t)(d_q8 >> 8)) & (CH_LEN - 1u), i1 = (i0 - 1u) & (CH_LEN - 1u);
     int32_t f = d_q8 & 255;
     return b[i0] + (((b[i1] - b[i0]) * f) >> 8);
 }
 
-static void chorus(int32_t *L, int32_t *R, uint32_t n)
+ZFAST static void chorus(int32_t *L, int32_t *R, uint32_t n)
 {
     int32_t mix = zf_mix(zf_chorus, zf_cmod), prev = ch_mix_prev;   /* Q15 */
     int32_t base = 79027, swing = 16934 + zf_depth * 445;     /* 0.007 fs and (0.0015 + 0.005 depth) fs, Q8 frames */
@@ -86,7 +86,7 @@ static int32_t dl_t = 6615 << 16;               /* the delay time, gliding (0.12
 static int32_t dl_lpl, dl_lpr, dl_prevL, dl_prevR, dl_mix_prev, dl_wow_from, dl_wow_to, dl_d8 = 6615 << 8;
 #define DL_GLIDE8 3241482                       /* 1 - exp(-8 / (0.12 x 22050)): 0.12 s, stepped every 8 frames, Q30 */
 
-static int32_t dl_soft(int32_t x)               /* Common.h softClip: linear to 0.8, then bending toward 1.2 */
+ZFAST static int32_t dl_soft(int32_t x)               /* Common.h softClip: linear to 0.8, then bending toward 1.2 */
 {
     int32_t a = x < 0 ? -x : x, y;
     uint32_t over;
@@ -96,15 +96,15 @@ static int32_t dl_soft(int32_t x)               /* Common.h softClip: linear to 
     y = 26214 + (int32_t)((over << 15) / (32768u + ((over * 5u) >> 1)));   /* over / (1 + 2.5 over) */
     return x < 0 ? -y : y;
 }
-static int32_t dl_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), linear; Q14 -> Q15 */
+ZFAST static int32_t dl_read(const int16_t *b, int32_t d_q8)   /* d frames ago (Q8), linear; Q14 -> Q15 */
 {
     uint32_t i0 = (dl_w - 1u - (uint32_t)(d_q8 >> 8)) & (DL_LEN - 1u), i1 = (i0 - 1u) & (DL_LEN - 1u);
     int32_t f = d_q8 & 255;
     return (b[i0] + (((b[i1] - b[i0]) * f) >> 8)) << 1;
 }
-static int16_t dl_q14(int32_t x) { x >>= 1; return (int16_t)(x > 32767 ? 32767 : x < -32768 ? -32768 : x); }
+ZFAST static int16_t dl_q14(int32_t x) { x >>= 1; return (int16_t)(x > 32767 ? 32767 : x < -32768 ? -32768 : x); }
 
-static void delay(int32_t *L, int32_t *R, uint32_t n)
+ZFAST static void delay(int32_t *L, int32_t *R, uint32_t n)
 {
     int32_t mix = zf_mix(zf_delay, zf_dmod), prev = dl_mix_prev, target = DL_TIME[zf_dtime & 127] << 8;
     int32_t fbk = (zf_dfb & 127) * 237, G = DL_LP[zf_dtone & 127];       /* feedback x 0.92, Q15 */
@@ -176,14 +176,14 @@ static void rv_set(void)                        /* from the knobs: line gains fo
     }
 }
 
-static int32_t rv_read(const int32_t *b, int32_t d_q8)
+ZFAST static int32_t rv_read(const int32_t *b, int32_t d_q8)
 {
     uint32_t i0 = (rv_w - 1u - (uint32_t)(d_q8 >> 8)) & (RV_CAP - 1u), i1 = (i0 - 1u) & (RV_CAP - 1u);
     int32_t f = d_q8 & 255;
     return b[i0] + (((b[i1] - b[i0]) * f) >> 8);        /* 32-bit: the tail stays well under 2^22 */
 }
 
-static void reverb(int32_t *L, int32_t *R, uint32_t n)
+ZFAST static void reverb(int32_t *L, int32_t *R, uint32_t n)
 {
     int32_t mix = zf_mix(zf_reverb, zf_rmod), prev = rv_mix_prev, shim = zf_shimmer * 258, G = RV_DAMP[zf_damp & 127];
     int32_t mod, y[RV_N], h[RV_N];
@@ -264,7 +264,7 @@ static void reverb(int32_t *L, int32_t *R, uint32_t n)
 static int32_t tn_lpL, tn_lpR, tn_hpL, tn_hpR, tn_hxL, tn_hxR;
 #define TN_LP 547097416                         /* one-pole low-pass, ~5 kHz: 1 - exp(-2 pi 5000 / 44100), Q30 */
 #define TN_HP 1046555113                        /* one-pole high-pass, ~180 Hz: exp(-2 pi 180 / 44100), Q30 */
-static void tone(int32_t *L, int32_t *R, uint32_t n)
+ZFAST static void tone(int32_t *L, int32_t *R, uint32_t n)
 {
     uint32_t i;
     if (zf_tone == 1)                           /* SOFT: half the signal through the low-pass (~-6 dB up top) */

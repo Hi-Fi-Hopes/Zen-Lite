@@ -180,16 +180,16 @@ def main():
             L.append(" },")
         L.append("},")
     L.append("};")
-    def arr(name, typ, vals):
-        L.append(f"static const {typ} {name}[{len(vals)}] = {{")
+    def arr(name, typ, vals, ram=False):     # ram: read every sample, so kept in RAM (no const), not the flash
+        L.append(f"static {'' if ram else 'const '}{typ} {name}[{len(vals)}] = {{")
         for i in range(0, len(vals), 12):
             L.append("  " + ",".join(map(str, vals[i:i + 12])) + ",")
         L.append("};")
-    arr("ZT_TANH", "int32_t", tanh)
+    arr("ZT_TANH", "int32_t", tanh, ram=True)
     arr("ZT_G", "int32_t", gtab)
     arr("ZT_ENV_A", "int32_t", env_a)
     arr("ZT_ENV_DR", "int32_t", env_dr)
-    arr("ZT_SIN", "int16_t", sin_t)
+    arr("ZT_SIN", "int16_t", sin_t, ram=True)
     arr("RV_RT", "int32_t", rv_rt)
     arr("ZT_EXP2F", "int32_t", exp2f)
     arr("ZT_ENV_A16", "int32_t", env_a16)

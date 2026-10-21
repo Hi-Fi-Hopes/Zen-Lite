@@ -37,13 +37,13 @@ static uint32_t zm_lfo_ph[2], zm_rnd_ph;
 static int32_t zm_rnd_held, zm_rnd_out, zm_plate_now[4];
 static struct { uint32_t count, period, step; int32_t from, to; } zm_drift[2];
 static uint32_t zm_seed = 0x2545F491u;
-static int32_t zm_random(void)                  /* -1..1, Q15 */
+ZFAST static int32_t zm_random(void)                  /* -1..1, Q15 */
 {
     zm_seed = zm_seed * 1664525u + 1013904223u;
     return (int32_t)(zm_seed >> 16) - 32768;
 }
 
-static uint32_t zm_exp2_mul(uint32_t x, int32_t oct_q10)   /* x times 2^(oct_q10 / 1024); x < 2^31 */
+ZFAST static uint32_t zm_exp2_mul(uint32_t x, int32_t oct_q10)   /* x times 2^(oct_q10 / 1024); x < 2^31 */
 {
     int32_t o = oct_q10 >> 10;                  /* (no 64-bit shifts by a variable: they would need libgcc) */
     uint32_t y = (uint32_t)(((uint64_t)x * (uint32_t)ZT_EXP2F[oct_q10 & 1023]) >> 30);
@@ -51,7 +51,7 @@ static uint32_t zm_exp2_mul(uint32_t x, int32_t oct_q10)   /* x times 2^(oct_q10
     return o < -31 ? 0u : y >> -o;
 }
 
-static int32_t zm_lfo_value(uint32_t k, uint32_t inc)   /* one LFO, one control block on (Engine.h lfoShape) */
+ZFAST static int32_t zm_lfo_value(uint32_t k, uint32_t inc)   /* one LFO, one control block on (Engine.h lfoShape) */
 {
     uint32_t ph = zm_lfo_ph[k] += inc;
     int32_t p = (int32_t)(ph >> 17);            /* Q15 */
@@ -94,7 +94,7 @@ static void zm_set_rand(int32_t rate_q10, int32_t smooth_q10)
 }
 
 /* the global sources for the next 16 control blocks (call at the top of each audio block) */
-static void zm_block(void)
+ZFAST static void zm_block(void)
 {
     uint32_t sb, k, inc[2];
     zm_vn = zm_gn = 0;
@@ -123,7 +123,7 @@ static void zm_block(void)
 }
 
 /* a global source in control block sb, Q15 */
-static int32_t zm_gsrc(uint32_t s, uint32_t sb)
+ZFAST static int32_t zm_gsrc(uint32_t s, uint32_t sb)
 {
     switch (s) {
     case ZS_LFO1: return zm_lfo[0][sb];
