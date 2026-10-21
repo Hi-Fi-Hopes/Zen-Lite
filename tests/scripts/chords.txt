@@ -1,0 +1,16 @@
+# the worst cases: six voices at once (a dense cluster and a wide spread), held, fast retriggers, the lowest notes
+200 keys 0x3F
+2200 keys 0
+2600 keys 0x2492481
+4600 keys 0
+4800 keys 0x1
+4850 keys 0
+4900 keys 0x1
+4950 keys 0
+5000 keys 0x1
+5050 keys 0
+5100 btn 0
+5150 btn 0
+5300 keys 0x10101
+6800 keys 0
+8500 end

@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Builds Zen-Lite on every push: the FM-1 package (.fwsc), the host render (WAV + screens), and the comparison
+# with the Zenthesizer plugin's own engine. Download "zenlite" from the run's Artifacts.
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: Hi-Fi-Hopes/Zenthesizer
+          path: zenthesizer
+
+      - name: Python tools
+        run: pip install Pillow numpy
+
+      - name: Cache the JieLi toolchain and SDK files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.jieli
+            ~/ac79sdk
+          key: jieli-ac79-v1.2.1-${{ hashFiles('tools/get_toolchain.sh') }}
+
+      - name: JieLi toolchain (clang for pi32v2)
+        run: |
+          if [ ! -x ~/.jieli/toolchain/pi32v2/bin/clang ]; then sh tools/get_toolchain.sh; fi
+          ls ~/.jieli/toolchain/pi32v2/bin/clang
+
+      - name: The three SDK files the package needs (AC79NN_SDK_V1.2.1_2023-12-13)
+        run: |
+          set -e
+          D=~/ac79sdk/cpu/wl82/tools
+          if [ ! -f "$D/uboot.boot" ]; then
+            mkdir -p "$D/cfg"
+            TAG=AC79NN_SDK_V1.2.1_2023-12-13
+            REPO=https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK
+            if git clone --depth 1 --branch "$TAG" --filter=blob:none --sparse "$REPO.git" /tmp/sdk; then
+              git -C /tmp/sdk sparse-checkout set cpu/wl82/tools
+              cp /tmp/sdk/cpu/wl82/tools/uboot.boot /tmp/sdk/cpu/wl82/tools/cfg_tool.bin "$D/"
+              cp /tmp/sdk/cpu/wl82/tools/cfg/eq_cfg_hw.bin "$D/cfg/"
+            else
+              for f in uboot.boot cfg_tool.bin cfg/eq_cfg_hw.bin; do
+                curl -fL --retry 3 -o "$D/$f" "$REPO/raw/$TAG/cpu/wl82/tools/$f"
+              done
+            fi
+          fi
+          cd "$D"
+          echo "4e3b4c220dc96641cb5a723f41e68ce41d5261ae9434bb33fbd7f2c59976ded4  uboot.boot" > /tmp/sums
+          echo "276579954f076886a6a7694f65dc71c034a63a2c204b76749065c0ac7b010d1b  cfg_tool.bin" >> /tmp/sums
+          echo "41167491bffed4651750719c973d2758adeb9021a5670d02d6a53c85ed80ea7d  cfg/eq_cfg_hw.bin" >> /tmp/sums
+          sha256sum -c /tmp/sums
+
+      - name: Tables
+        run: |
+          python3 tools/gen_tables.py
+          git diff --exit-code firmware/gen/zen_tables.h
+
+      - name: Build the FM-1 package
+        run: AC79_SDK=~/ac79sdk ./build.sh
+
+      - name: Play it on the host and compare with the plugin
+        run: |
+          sh tests/run_host.sh
+          ZEN_SRC=zenthesizer sh tests/check_audio.sh
+          cc -O2 -DDINGHY_HOST -DAPP_VER='"ci"' -Ifirmware/src -Ifirmware/gen -o build/host/zl_demo firmware/src/zenlite.c
+          build/host/zl_demo build/host/demo tests/scripts/demo.txt > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenlite
+          path: |
+            build/zenlite.fwsc
+            build/host/demo.wav
+            build/host/*.png

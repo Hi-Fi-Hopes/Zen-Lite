@@ -1,0 +1,10 @@
+# one note, a triad, a MIDI note, an octave up: the host's own demo
+200 keys 0x80
+700 keys 0x4880
+1500 keys 0
+1700 midi 0x90 81 120
+2300 midi 0x80 81 0
+2500 btn 1
+2700 keys 0x204
+3400 keys 0
+6500 end

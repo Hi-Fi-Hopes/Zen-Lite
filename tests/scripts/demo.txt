@@ -1,0 +1,229 @@
+# demo: Dm7, G, Am7, Fmaj7 with a knob turned over each; then a line over a held D
+200 keys 0x91200
+600 enc 3 1
+660 enc 3 1
+720 enc 3 1
+780 enc 3 1
+840 enc 3 1
+900 enc 3 1
+960 enc 3 1
+1020 enc 3 1
+1080 enc 3 1
+1140 enc 3 1
+1200 enc 3 1
+1260 enc 3 1
+1320 enc 3 1
+1380 enc 3 1
+1440 enc 3 1
+1500 enc 3 1
+1560 enc 3 1
+1620 enc 3 1
+1680 enc 3 1
+1740 enc 3 1
+1800 enc 3 1
+1860 enc 3 1
+1920 enc 3 1
+1980 enc 3 1
+2040 enc 3 1
+2100 enc 3 1
+2160 enc 3 1
+2220 enc 3 1
+2280 enc 3 1
+2340 enc 3 1
+2600 keys 0
+2650 keys 0x244000
+2800 enc 2 1
+2850 enc 2 1
+2900 enc 2 1
+2950 enc 2 1
+3000 enc 2 1
+3050 enc 2 1
+3100 enc 2 1
+3150 enc 2 1
+3200 enc 2 1
+3250 enc 2 1
+3300 enc 2 1
+3350 enc 2 1
+3400 enc 2 1
+3450 enc 2 1
+3500 enc 2 1
+3550 enc 2 1
+3600 enc 2 1
+3650 enc 2 1
+3700 enc 2 1
+3750 enc 2 1
+3800 enc 2 1
+3850 enc 2 1
+3900 enc 2 1
+3950 enc 2 1
+4000 enc 2 1
+4050 enc 2 1
+4100 enc 2 1
+4150 enc 2 1
+4200 enc 2 1
+4250 enc 2 1
+4300 enc 2 1
+4350 enc 2 1
+4400 enc 2 1
+4450 enc 2 1
+4500 enc 2 1
+4550 enc 2 1
+4600 enc 2 1
+4650 enc 2 1
+4700 enc 2 1
+4750 enc 2 1
+2800 enc 3 -1
+2850 enc 3 -1
+2900 enc 3 -1
+2950 enc 3 -1
+3000 enc 3 -1
+3050 enc 3 -1
+3100 enc 3 -1
+3150 enc 3 -1
+3200 enc 3 -1
+3250 enc 3 -1
+3300 enc 3 -1
+3350 enc 3 -1
+3400 enc 3 -1
+3450 enc 3 -1
+3500 enc 3 -1
+3550 enc 3 -1
+3600 enc 3 -1
+3650 enc 3 -1
+3700 enc 3 -1
+3750 enc 3 -1
+3800 enc 3 -1
+3850 enc 3 -1
+3900 enc 3 -1
+3950 enc 3 -1
+4000 enc 3 -1
+4050 enc 3 -1
+4100 enc 3 -1
+4150 enc 3 -1
+4200 enc 3 -1
+4250 enc 3 -1
+5000 keys 0
+5050 keys 0x4890000
+5200 enc 4 1
+5250 enc 4 1
+5300 enc 4 1
+5350 enc 4 1
+5400 enc 4 1
+5450 enc 4 1
+5500 enc 4 1
+5550 enc 4 1
+5600 enc 4 1
+5650 enc 4 1
+5700 enc 4 1
+5750 enc 4 1
+5800 enc 4 1
+5850 enc 4 1
+5900 enc 4 1
+5950 enc 4 1
+6000 enc 4 1
+6050 enc 4 1
+6100 enc 4 1
+6150 enc 4 1
+6200 enc 4 1
+6250 enc 4 1
+6300 enc 4 1
+6350 enc 4 1
+6400 enc 4 1
+6450 enc 4 1
+6500 enc 4 1
+6550 enc 4 1
+6600 enc 4 1
+6650 enc 4 1
+6700 enc 4 1
+6750 enc 4 1
+6800 enc 4 1
+6850 enc 4 1
+6900 enc 4 1
+6950 enc 4 1
+7000 enc 4 1
+7050 enc 4 1
+7100 enc 4 1
+7150 enc 4 1
+7400 keys 0
+7450 keys 0x891000
+7600 enc 4 -1
+7640 enc 4 -1
+7680 enc 4 -1
+7720 enc 4 -1
+7760 enc 4 -1
+7800 enc 4 -1
+7840 enc 4 -1
+7880 enc 4 -1
+7920 enc 4 -1
+7960 enc 4 -1
+8000 enc 4 -1
+8040 enc 4 -1
+8080 enc 4 -1
+8120 enc 4 -1
+8160 enc 4 -1
+8200 enc 4 -1
+8240 enc 4 -1
+8280 enc 4 -1
+8320 enc 4 -1
+8360 enc 4 -1
+8400 enc 4 -1
+8440 enc 4 -1
+8480 enc 4 -1
+8520 enc 4 -1
+8560 enc 4 -1
+8600 enc 4 -1
+8640 enc 4 -1
+8680 enc 4 -1
+8720 enc 4 -1
+8760 enc 4 -1
+8800 enc 4 -1
+8840 enc 4 -1
+8880 enc 4 -1
+8920 enc 4 -1
+8960 enc 4 -1
+9000 enc 4 -1
+9040 enc 4 -1
+9080 enc 4 -1
+9120 enc 4 -1
+9160 enc 4 -1
+7600 enc 5 1
+7640 enc 5 1
+7680 enc 5 1
+7720 enc 5 1
+7760 enc 5 1
+7800 enc 5 1
+7840 enc 5 1
+7880 enc 5 1
+7920 enc 5 1
+7960 enc 5 1
+8000 enc 5 1
+8040 enc 5 1
+8080 enc 5 1
+8120 enc 5 1
+8160 enc 5 1
+8200 enc 5 1
+8240 enc 5 1
+8280 enc 5 1
+8320 enc 5 1
+8360 enc 5 1
+9800 keys 0
+10100 keys 0x201
+10440 keys 0x1
+10500 keys 0x1001
+10840 keys 0x1
+10900 keys 0x10001
+11240 keys 0x1
+11300 keys 0x80001
+11640 keys 0x1
+11700 keys 0x200001
+12240 keys 0x1
+12300 keys 0x80001
+12640 keys 0x1
+12700 keys 0x10001
+13040 keys 0x1
+13100 keys 0x4001
+13540 keys 0x1
+13600 keys 0x1001
+14340 keys 0x1
+14400 keys 0
+17500 end
