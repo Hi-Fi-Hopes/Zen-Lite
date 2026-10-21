@@ -113,6 +113,9 @@ static void load_preset(uint32_t i)            /* the sound of preset i; the pla
 
 /* ---- the sound */
 static int32_t mixL[HALF_FRAMES], mixR[HALF_FRAMES];
+#define SC_N 1024u                              /* the scope's last 1024 output samples (mono) */
+static int16_t sc_ring[SC_N];
+static volatile uint32_t sc_w;
 static volatile uint32_t cpu_ticks_max, guard_drops;
 #define GUARD_TICKS (5805u * FM1_TICKS_PER_US * 85u / 100u)   /* over 85 % of a block: shed a voice */
 #ifdef DINGHY_HOST
@@ -147,7 +150,9 @@ static void app_audio(int32_t *out, uint32_t n)
     for (i = 0; i < n; i++) {
         out[2u * i] += mixL[i];
         out[2u * i + 1u] += mixR[i];
+        sc_ring[(sc_w + i) & (SC_N - 1u)] = (int16_t)((mixL[i] + mixR[i]) >> 1);   /* for the scope */
     }
+    sc_w = (sc_w + n) & (SC_N - 1u);
     {
         static uint32_t hold;                   /* one voice per 8 blocks (46 ms): a fade takes 4 ms to free the time */
 #ifdef DINGHY_HOST
@@ -336,77 +341,183 @@ static void value_text(uint32_t p, char *s)
     }
 }
 
-static void draw_row(uint32_t page, uint32_t r, int hot)
+/* ---- the screen, after the mock-ups: a header (the page; the limiter and CPU), the scope in the middle (with the
+ * preset's name on HOME, and the chord, the key or the knob being turned along its foot), four cards along the
+ * bottom, one a knob: its name, its value, a bar. The screen is drawn in three strips through gfx.c's canvas. */
+#define Y_SCOPE 22u
+#define H_SCOPE 124u
+#define Y_CARDS 146u
+#define H_CARDS 94u
+#define ZC_EDGE RGB(74, 56, 30)                 /* the rules */
+#define ZC_WAVE RGB(255, 196, 92)
+#define ZC_GLOW RGB(110, 70, 22)
+static const uint16_t PLATE_C[4] = {RGB(232, 84, 62), RGB(240, 152, 52), RGB(86, 164, 232), RGB(96, 204, 124)};
+static const char *const SHORT[P_N] = {"BLOOM", "MORPH", "ECHOES", "SPACE", "CUTOFF", "RES", "DRIVE", "ENV AMT",
+    "WAVE", "SHAPE", "DETUNE", "LEVEL", "TABLE", "POS", "WARP", "LEVEL", "TUNE", "GLIDE", "VEL", "VOLUME",
+    "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "ATTACK", "DECAY", "SUSTAIN", "RELEASE",
+    "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "1 RATE", "1 SHAPE", "2 RATE", "2 SHAPE",
+    "RANDOM", "SMOOTH", "KEYTRK", "STEREO", "CHORUS", "REVERB", "DECAY", "SHIMMER", "SIZE", "DAMP", "DEPTH", "SPEAKER",
+    "TIME", "FEEDBK", "TONE", "MIX", "KEY", "SCALE", "KEYS", "SPREAD"};
+static const char *const SRC_SHORT[ZS_N] = {"--", "ENV 1", "ENV 2", "LFO 1", "LFO 2", "RANDOM", "PRESS", "VEL",
+    "WHEEL", "CH PRS", "BLOOM", "MORPH", "ECHOES", "SPACE", "KEY", "SLIDE"};
+static const char *const DST_SHORT[ZD_N] = {"--", "PITCH", "A TUNE", "A DET", "A SHAPE", "A LEVEL", "B POS",
+    "B WARP", "-", "B LEVEL", "-", "CUTOFF", "RES", "DRIVE", "AMP", "PAN", "L1 RATE", "L2 RATE", "CHORUS", "DELAY",
+    "REVERB"};
+static const char *const SCALE_SHORT[11] = {"CHROM", "MAJOR", "MINOR", "DORIAN", "LYDIAN", "MAJPENT", "MINPENT",
+    "HIRAJO", "IN-SEN", "CELTIC", "WHOLE"};
+
+static void value_short(uint32_t p, char *s)    /* a card's value: 7 characters at most */
 {
-    static const char *const MODROW[4] = {"SLOT", "SOURCE", "DEST", "AMOUNT"};
-    uint32_t p = page_param(page, r);
-    char s[16];
-    int32_t y = 88 + (int32_t)r * 24;
-    char lab[16] = "1  ";
-    lab[0] = (char)('1' + r);
-    zcat(lab, p < P_N ? PARAM[p].name : MODROW[p - P_MSLOT]);
-    value_text(p, s);
-    draw_text_box(10, y, 120, &FONT_S, lab, hot ? ZC_AMBER : ZC_BRASS, 0);
-    draw_text_box(130, y, 100, &FONT_S, s, ZC_BONE, 2);
+    static const char *const WAVE[4] = {"SAW", "SQUARE", "TRI", "SINE"};
+    static const char *const LFO[5] = {"SINE", "TRI", "SAW", "SQUARE", "DRIFT"};
+    static const char *const TONE[3] = {"FLAT", "SOFT", "LO CUT"};
+    uint32_t v = p < P_N ? set.p[p] : 0;
+    const zps_t *sl = &set.slot[mod_sel];
+    s[0] = 0;
+    switch (p) {
+    case P_WAVE: zcat(s, WAVE[v & 3u]); break;
+    case P_L1SHAPE: case P_L2SHAPE: zcat(s, LFO[v > 4u ? 0u : v]); break;
+    case P_TONE: zcat(s, TONE[v > 2u ? 0u : v]); break;
+    case P_L1RATE: case P_L2RATE: case P_RRATE:
+        fixed2(s, (uint32_t)(((uint64_t)ZT_LFO_INC[q10(v)] * 275625u) >> 32)); break;
+    case P_DTIME: {
+        uint32_t ms = (uint32_t)(DL_TIME[v & 127u] >> 8) * 1000u / 22050u;
+        if (ms < 1000u) { num(s, (int32_t)ms); zcat(s, "MS"); } else { fixed2(s, ms / 10u); zcat(s, "S"); }
+        break;
+    }
+    case P_SCALE: zcat(s, SCALE_SHORT[v > 10u ? 0u : v]); break;
+    case P_KEYS: zcat(s, v ? "CHROM" : "SCALE"); break;
+    case P_MSLOT: num(s, (int32_t)mod_sel + 1); break;
+    case P_MSRC: zcat(s, SRC_SHORT[sl->src < ZS_N ? sl->src : 0]); break;
+    case P_MDST: zcat(s, DST_SHORT[sl->dst < ZD_N ? sl->dst : 0]); break;
+    default: value_text(p, s);
+    }
+}
+static uint32_t bar_of(uint32_t p)              /* a card's bar, 0..1024 */
+{
+    const zps_t *sl = &set.slot[mod_sel];
+    int32_t a;
+    if (p < P_N) return (uint32_t)(((uint32_t)set.p[p] - PARAM[p].lo) * 1024u / (uint32_t)(PARAM[p].hi - PARAM[p].lo));
+    if (p == P_MSLOT) return mod_sel * 1024u / (ZM_NSLOTS - 1u);
+    if (p == P_MSRC) return sl->src * 1024u / (ZS_N - 1u);
+    if (p == P_MDST) return sl->dst * 1024u / (ZD_N - 1u);
+    a = sl->amt < 0 ? -sl->amt : sl->amt;
+    return (uint32_t)a;
 }
 
-static void draw_info(void)                     /* the line under the title: the chord playing, or the key */
+/* the header: the page's name; on the right the limiter (when it works), DROP (the guard), CPU */
+static uint32_t ui_cpu, ui_drop;
+static int32_t ui_lim;
+static void ui_header(uint32_t page)
 {
+    char r[32], t[12];
+    r[0] = 0;
+    cv_begin(240, 22, C_BLACK);
+    cv_text(6, 2, &FONT_S, page == PG_HOME ? "ZEN-LITE" : PAGE_NAME[page], ZC_BRASS);
+    if (ui_lim > 0) {
+        zcat(r, "-"); num(t, ui_lim / 10); zcat(r, t); zcat(r, "."); t[0] = (char)('0' + ui_lim % 10); t[1] = 0;
+        zcat(r, t); zcat(r, "DB ");
+    }
+    if (ui_drop) zcat(r, "DROP ");
+    zcat(r, "CPU "); num(t, (int32_t)ui_cpu); zcat(r, t); zcat(r, "%");
+    cv_text(234 - text_w(&FONT_S, r), 2, &FONT_S, r, ui_drop || ui_cpu > 75u ? ZC_AMBER : ZC_DIM);
+    cv_rect(0, 21, 240, 1, ZC_EDGE);
+    cv_blit(0, 0);
+}
+
+/* the cards: knob 1-4, left to right; the one being turned is lit */
+static void ui_cards(uint32_t page, uint32_t hot)
+{
+    uint32_t r;
+    cv_begin(240, H_CARDS, C_BLACK);
+    for (r = 0; r < 4u; r++) {
+        uint32_t p = page_param(page, r), w;
+        int32_t x = (int32_t)r * 60, tw;
+        uint16_t c = page == PG_HOME ? PLATE_C[r] : ZC_AMBER;
+        char v[16];
+        const char *lab = p < P_N ? SHORT[p] : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT];
+        if (r) cv_rect(x, 6, 1, H_CARDS - 12, ZC_EDGE);
+        cv_text(x + (60 - text_w(&FONT_S, lab)) / 2, 6, &FONT_S, lab, r == hot ? ZC_BONE : ZC_BRASS);
+        value_short(p, v);
+        tw = text_w(&FONT_L, v);
+        if (tw <= 56) cv_text(x + (60 - tw) / 2, 30, &FONT_L, v, ZC_BONE);
+        else cv_text(x + (60 - text_w(&FONT_S, v)) / 2, 38, &FONT_S, v, ZC_BONE);
+        w = bar_of(p) * 48u / 1024u;
+        cv_rect(x + 6, 74, 48, 3, ZC_EDGE);
+        cv_rect(x + 6, 74, (int32_t)w, 3, c);
+    }
+    cv_blit(0, Y_CARDS);
+}
+
+/* the scope: the last 1024 samples of the output (the audio interrupt writes them); a rising zero crossing holds
+ * the wave still, two samples a pixel (11 ms across), the height follows the level (up to x 8) */
+static int32_t sc_peak = 4096;
+static void ui_scope(uint32_t page, uint32_t hot)
+{
+    static int16_t snap[SC_N];
+    uint32_t w = sc_w, i, t0 = 0, x;
+    int32_t pk = 0, g, prev = 0, mid, half;
     char s[40];
-    s[0] = 0;
-    if (set.p[P_KEYS]) zcat(s, "CHROMATIC KEYS");
+    for (i = 0; i < SC_N; i++) {
+        snap[i] = sc_ring[(w + i) & (SC_N - 1u)];
+        if (snap[i] > pk) pk = snap[i];
+        if (-snap[i] > pk) pk = -snap[i];
+    }
+    sc_peak = pk > sc_peak ? pk : sc_peak - ((sc_peak - pk) >> 4);
+    if (sc_peak < 2048) sc_peak = 2048;
+    {                                           /* the wave's band: under the name on HOME, over the foot's text */
+        int32_t top = page == PG_HOME ? 56 : 6, bot = (int32_t)H_SCOPE - 24;
+        mid = (top + bot) / 2; half = (bot - top) / 2;
+    }
+    g = (half << 16) / sc_peak;                 /* px per sample unit, Q16: the peak at the band's edge */
+    for (i = 1; i < SC_N - 480u; i++)           /* the first rising zero crossing */
+        if (snap[i - 1] < 0 && snap[i] >= 0) { t0 = i; break; }
+    cv_begin(240, H_SCOPE, C_BLACK);
+    cv_rect(0, mid, 240, 1, ZC_EDGE);
+    for (x = 0; x < 240u; x++) {
+        int32_t a = (snap[t0 + 2u * x] + snap[t0 + 2u * x + 1u]) >> 1;
+        int32_t y = mid - ((a * g) >> 16);
+        y = y < mid - half ? mid - half : y > mid + half ? mid + half : y;
+        if (x) {
+            cv_line((int32_t)x - 1, prev + 1, (int32_t)x, y + 1, ZC_GLOW);
+            cv_line((int32_t)x - 1, prev, (int32_t)x, y, ZC_WAVE);
+        }
+        prev = y;
+    }
+    if (page == PG_HOME) {                      /* the preset, and where it is in the list */
+        const char *nm = ZPRESET[set.preset % ZPRESETS].name;
+        char t[12];
+        if (text_w(&FONT_L, nm) <= 232) cv_text((240 - text_w(&FONT_L, nm)) / 2, 4, &FONT_L, nm, ZC_BRASS);
+        else cv_text((240 - text_w(&FONT_S, nm)) / 2, 12, &FONT_S, nm, ZC_BRASS);
+        s[0] = 0;
+        num(t, (int32_t)set.preset); zcat(s, t); zcat(s, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(s, t);
+        cv_text((240 - text_w(&FONT_S, s)) / 2, 36, &FONT_S, s, ZC_DIM);
+    }
+    s[0] = 0;                                   /* the foot: the knob being turned, else the chord, else the key */
+    if (hot < 4u) {
+        uint32_t p = page_param(page, hot);
+        char v[24];
+        zcat(s, p < P_N ? PARAM[p].name : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT]);
+        zcat(s, "  ");
+        value_text(p, v); zcat(s, v);
+    } else if (set.p[P_KEYS]) zcat(s, "CHROMATIC KEYS");
     else if (last_chord >= 0) zcat(s, chord_text);
     else {
         zcat(s, znote_name(set.p[P_KEY], zkey_flats(set.p[P_KEY], set.p[P_SCALE])));
-        zcat(s, " ");
-        zcat(s, ZSCALES[set.p[P_SCALE]].name);
+        zcat(s, " "); zcat(s, ZSCALES[set.p[P_SCALE]].name);
     }
-    draw_text_box(0, 54, 240, &FONT_S, s, last_chord >= 0 && !set.p[P_KEYS] ? ZC_AMBER : ZC_DIM, 1);
+    if (set.oct) { char t[8] = "  OCT +"; t[6] = set.oct < 0 ? '-' : '+'; t[7] = 0; zcat(s, t);
+                   t[0] = (char)('0' + (set.oct < 0 ? -set.oct : set.oct)); t[1] = 0; zcat(s, t); }
+    cv_text((240 - text_w(&FONT_S, s)) / 2, (int32_t)H_SCOPE - 20, &FONT_S, s,
+            hot < 4u ? ZC_BONE : last_chord >= 0 && !set.p[P_KEYS] ? ZC_AMBER : ZC_DIM);
+    cv_blit(0, Y_SCOPE);
 }
 
 static void draw_page(uint32_t page)
 {
-    uint32_t r;
-    lcd_fill(0, 0, 240, 186, C_BLACK);
-    if (page == PG_HOME) {                      /* HOME: the preset's name, and its number */
-        const char *nm = ZPRESET[set.preset % ZPRESETS].name;
-        char t[12];
-        if (text_w(&FONT_L, nm) <= 236) draw_text_box(0, 8, 240, &FONT_L, nm, ZC_BRASS, 1);
-        else draw_text_box(0, 16, 240, &FONT_S, nm, ZC_BRASS, 1);
-        char u[24];
-        u[0] = 0;
-        num(t, (int32_t)set.preset); zcat(u, t); zcat(u, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(u, t);
-        draw_text_box(0, 38, 240, &FONT_S, u, ZC_DIM, 1);
-    } else
-        draw_text_box(0, 14, 240, &FONT_L, PAGE_NAME[page], ZC_BRASS, 1);
-    draw_info();
-    for (r = 0; r < 4u; r++) draw_row(page, r, 0);
-}
-
-static void draw_status(uint32_t cpu_pct, int32_t lim_tenths, uint32_t voices, int dropping)
-{
-    char a[40] = "CPU ", b[8], c[32] = "OCT +0   VOICES ";
-    uint32_t i = 4, j;
-    num(b, (int32_t)cpu_pct);
-    for (j = 0; b[j]; j++) a[i++] = b[j];
-    a[i++] = '%'; a[i++] = ' '; a[i++] = ' ';
-    { const char *p = "LIMIT "; while (*p) a[i++] = *p++; }
-    if (lim_tenths <= 0) { a[i++] = '-'; a[i++] = '-'; }
-    else {
-        a[i++] = '-';
-        num(b, lim_tenths / 10);
-        for (j = 0; b[j]; j++) a[i++] = b[j];
-        a[i++] = '.';
-        a[i++] = (char)('0' + lim_tenths % 10);
-        a[i++] = ' '; a[i++] = 'd'; a[i++] = 'B';
-    }
-    a[i] = 0;
-    draw_text_box(0, 190, 240, &FONT_S, a, cpu_pct > 50u ? ZC_AMBER : ZC_DIM, 1);
-    c[4] = set.oct < 0 ? '-' : '+';
-    c[5] = (char)('0' + (set.oct < 0 ? -set.oct : set.oct));
-    c[16] = (char)('0' + voices); c[17] = '/'; c[18] = (char)('0' + ZV); c[19] = 0;
-    if (dropping) zcat(c, "  DROP");            /* the guard faded a voice out: the CPU was nearly full */
-    draw_text_box(0, 212, 240, &FONT_S, c, dropping ? ZC_AMBER : ZC_DIM, 1);
+    ui_header(page);
+    ui_cards(page, 9);
+    ui_scope(page, 9);
 }
 
 static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenths of a dB (0.1 dB = x 0.98855) */
@@ -419,7 +530,7 @@ static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenth
 /* ---- the main loop */
 static void app_main(void)
 {
-    uint32_t prev = 0, k, t_change = 0, dirty = 0, t_stat = 0, voices_drawn = 99, hot = 9, t_hot = 0, page = 0;
+    uint32_t prev = 0, k, t_change = 0, dirty = 0, t_stat = 0, voices_drawn = 99, hot = 9, t_hot = 0, page = 0, t_scope = 0;
     uint32_t key_tag[27] = {0}, midi_tag[128] = {0};
     int8_t key_chord[27];
     for (k = 0; k < P_N; k++) set.p[k] = PARAM[k].def;
@@ -447,12 +558,11 @@ static void app_main(void)
 
     lcd_fill(0, 0, 240, 240, C_BLACK);
     draw_page(page);
-    draw_status(0, 0, 0, 0);
 
     for (;;) {
         uint32_t keys, down, up, b, rel, lit, voices = 0, chromatic = set.p[P_KEYS];
         uint8_t st, d1, d2;
-        int m7, m9, sus, strum, redraw_info = 0;
+        int m7, m9, sus, strum;
         int32_t pd;
         platform_poll();
 
@@ -485,7 +595,6 @@ static void app_main(void)
                 } else if (black_of[k] < 7) {
                     chord_down((uint32_t)black_of[k], m7, m9, sus, strum);
                     key_chord[k] = black_of[k];
-                    redraw_info = 1;
                 }
             }
         }
@@ -505,8 +614,7 @@ static void app_main(void)
         }
         if (b & (1u << BTN_SEL)) {              /* SEL: scale keys <-> chromatic keys */
             set.p[P_KEYS] ^= 1u; dirty = 1; t_change = fm1_ms;
-            if (page == PG_GLO) draw_row(PG_GLO, 2, 0);
-            redraw_info = 1;
+            if (page == PG_GLO) ui_cards(page, hot);
         }
 
         pd = fm1_enc_take(ENC_PRESETS);         /* PRESETS: the next or previous preset, shown on HOME */
@@ -544,14 +652,12 @@ static void app_main(void)
                 sl->amt = (int16_t)(nv < -1024 ? -1024 : nv > 1024 ? 1024 : nv);
             }
             apply();
-            if (p == P_MSLOT) { draw_row(page, 1, 0); draw_row(page, 2, 0); draw_row(page, 3, 0); }
-            if (hot != k && hot < 4u) draw_row(page, hot, 0);
             hot = k; t_hot = fm1_ms;
-            draw_row(page, k, 1);
-            if (p >= P_KEY && p <= P_SPREAD) { last_chord = -1; redraw_info = 1; }
+            ui_cards(page, hot);
+            if (p >= P_KEY && p <= P_SPREAD) last_chord = -1;
             if (p != P_MSLOT) { dirty = 1; t_change = fm1_ms; }
         }
-        if (hot < 4u && fm1_ms - t_hot > 1500u) { draw_row(page, hot, 0); hot = 9; }
+        if (hot < 4u && fm1_ms - t_hot > 1500u) { hot = 9; ui_cards(page, hot); }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI: chromatic notes with velocity, and expression */
             uint32_t ty = st & 0xF0u;
@@ -566,7 +672,7 @@ static void app_main(void)
             else if (ty == 0xB0u && d1 == 74u) zm_slide = (int32_t)d2 * 258;
         }
 
-        if (redraw_info) draw_info();
+        if (fm1_ms - t_scope >= 66u) { ui_scope(page, hot); t_scope = fm1_ms; }   /* the scope, 15 times a second */
         lit = keys;
         for (k = 0; k < ZV; k++) if (zv[k].stage) voices++;
         for (k = 0; k < 27u; k++)
@@ -589,7 +695,8 @@ static void app_main(void)
             {
                 static uint32_t drops_seen, t_drop = 0xFFFF0000u;
                 if (guard_drops != drops_seen) { drops_seen = guard_drops; t_drop = fm1_ms; }
-                draw_status(cpu, lim_db_tenths(g), voices, fm1_ms - t_drop < 2000u);
+                ui_cpu = cpu; ui_lim = lim_db_tenths(g); ui_drop = fm1_ms - t_drop < 2000u;
+                ui_header(page);
             }
             t_stat = fm1_ms;
             voices_drawn = voices;

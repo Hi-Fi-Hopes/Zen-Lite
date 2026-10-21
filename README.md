@@ -6,7 +6,7 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: step 3.2 (0.5)
+## Status: step 3.3 (0.6)
 
 Six voices of the plugin's two engines into its ladder filter, with its envelopes, modulation, effects and
 look-ahead limiter at -1 dBFS, and 179 of its presets:
@@ -76,7 +76,12 @@ OCT- / OCT+ the octave, MASTER the volume. USB-MIDI in: notes (chromatic, with v
 semitones), mod wheel (CC 1), CC 74, channel and poly pressure. The screen's last lines: **CPU**, **LIMIT**,
 octave, voices.
 
-Next (step 3.3): the screens of the mock-ups, with a simple scope on HOME.
+### The screen
+
+The mock-ups' frame on every page: the page name with the limiter and CPU along the top; a scope of the output in
+the middle (on HOME under the preset's name), with the chord, the key, or the knob being turned (its full name and
+value) along its foot; four cards along the bottom, one a knob, each with a value and a bar. The scope redraws 15
+times a second from the main loop: it costs the sound nothing but a copy of each block.
 
 ## Install, test, go back
 
