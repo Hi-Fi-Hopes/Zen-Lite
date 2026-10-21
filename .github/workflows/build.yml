@@ -71,7 +71,8 @@ jobs:
       - name: Build the FM-1 package
         run: |
           VER=$(cat VERSION)
-          AC79_SDK=~/ac79sdk ./build.sh --release "$VER" | tee build-report.txt
+          set -o pipefail
+          AC79_SDK=~/ac79sdk ./build.sh --release "$VER" 2>&1 | tee build-report.txt
           cp "build/zenlite-$VER.fwsc" build/zenlite.fwsc
           sha256sum build/zenlite.fwsc | tee -a build-report.txt
 
@@ -100,3 +101,14 @@ jobs:
           git add .
           git -c user.name=zen-lite-ci -c user.email=ci@users.noreply.github.com commit -q -m "build of ${GITHUB_SHA::7}"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" builds
+
+      - name: On failure, publish the report to the ci-failed branch (the logs are not readable everywhere)
+        if: failure()
+        run: |
+          mkdir fail
+          cp build-report.txt fail/ 2>/dev/null || echo "no build report" > fail/build-report.txt
+          cd fail
+          git init -q -b ci-failed
+          git add .
+          git -c user.name=zen-lite-ci -c user.email=ci@users.noreply.github.com commit -q -m "failed build of ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" ci-failed
