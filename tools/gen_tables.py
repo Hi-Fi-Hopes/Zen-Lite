@@ -27,6 +27,34 @@ def glass(t):
         a[h] = (0.8 if h == 1 else 0.0) + ((g * 0.9 + 0.15 / (h * h)) if keep else 0.0)
     return a
 
+def air(t):
+    """AIR: pure sine opening into a soft, breathy saw (case 0)."""
+    p = 3.2 - 2.2 * t
+    return [0.0] + [1.0 if h == 1 else h ** (-p) * (0.6 if h % 2 == 0 else 1.0) for h in range(1, MAXH + 1)]
+
+def vox(t):
+    """VOX: vowels a-e-i-o-u, formants for a ~220 Hz voice (case 2)."""
+    vf = [[800, 1150, 2900], [400, 1600, 2700], [270, 2140, 2950], [450, 800, 2830], [325, 700, 2530]]
+    x = t * 4.0
+    i0 = min(3, int(x))
+    fr = x - i0
+    a = [0.0] * (MAXH + 1)
+    for h in range(1, MAXH + 1):
+        hz = 220.0 * h
+        env = 0.0
+        for k in range(3):
+            f = vf[i0][k] + (vf[i0 + 1][k] - vf[i0][k]) * fr
+            bw = 80.0 + 40.0 * k
+            g = 1.0 if k == 0 else 0.6 if k == 1 else 0.35
+            env += g * math.exp(-(hz - f) ** 2 / (2.0 * bw * bw))
+        a[h] = (0.12 + env) * h ** -0.8
+    return a
+
+def reed(t):
+    """REED: square-ish to a narrow reedy pulse (case 3)."""
+    w = 0.5 - 0.42 * t
+    return [0.0] + [abs(math.sin(math.pi * h * w)) / h * (1.0 - 0.25 * t * (1.0 if h % 3 == 0 else 0.0)) for h in range(1, MAXH + 1)]
+
 def table(amp_fn):
     sine = [math.sin(2 * math.pi * i / SIZE) for i in range(SIZE)]
     out = []
@@ -47,10 +75,13 @@ def table(amp_fn):
                 norm = 1.0 / max(1e-6, max(abs(v) for v in tmp))
             frame.append([v * norm for v in tmp])
         out.append(frame)
-    # the band-limited copies overshoot the full one a little (Gibbs): scale everything under int16
-    worst = max(abs(v) for fr in out for lv in fr for v in lv)
+    return out
+
+def to_int16(tables):
+    """the band-limited copies overshoot the full one a little (Gibbs): one scale for all tables, under int16"""
+    worst = max(abs(v) for t in tables for fr in t for lv in fr for v in lv)
     scale = 32767 / worst
-    return [[[round(v * scale) for v in lv] for lv in fr] for fr in out], scale
+    return [[[[round(v * scale) for v in lv] for lv in fr] for fr in t] for t in tables], scale
 
 def fast_tanh(x):                         # Voice.h fastTanh
     x = max(-4.5, min(4.5, x))
@@ -60,7 +91,7 @@ def q(v, bits):
     return int(round(v * (1 << bits)))
 
 def main():
-    g, gscale = table(glass)
+    tabs, gscale = to_int16([table(air), table(glass), table(vox), table(reed)])   # the plugin's order: AIR GLASS VOX REED
     tanh = [q(fast_tanh(-4.0 + 8.0 * i / 1024), 24) for i in range(1025)]   # input -4..4, Q24 out
 
     gtab = []                              # cutoff knob (Q10, 0..1024) -> G of the TPT one-pole, Q30
@@ -85,6 +116,15 @@ def main():
         side = min(1.0, d * 5.0)
         det += [q(2 ** (-cents / 1200), 30), q(2 ** (cents / 1200 * 1.07), 30), q(side, 15), q(1 / (1 + side * 1.2), 15)]
 
+    HF = FS / 2
+    rv_rt = [round(0.4 * 75.0 ** (k / 127) * HF) for k in range(128)]               # reverbSec, in half-rate samples
+    rv_damp = []
+    for k in range(128):                                                          # damping one-pole, Q30 at half rate
+        hz = min(1500.0 * 2.0 ** ((1.0 - k / 127) * 3.5), HF * 0.45)
+        gg = math.tan(math.pi * hz / HF)
+        rv_damp.append(q(gg / (1 + gg), 30))
+    rv_exp = [q(10 ** (-3.0 * (i / 1024)), 30) for i in range(1025)]             # 10^(-3x), x 0..1 (Q10)
+
     voice_pan = [-0.15, 0.15, -0.45, 0.45, -0.3, 0.3, -0.6, 0.6]       # Engine.h, times spread 0.5
     pan = []
     for p in voice_pan:
@@ -97,12 +137,15 @@ def main():
          "#ifndef ZEN_TABLES_H", "#define ZEN_TABLES_H", "#include <stdint.h>",
          f"#define ZT_SIZE {SIZE}u", f"#define ZT_FRAMES {FRAMES}u", f"#define ZT_LEVELS {LEVELS}u", f"#define ZT_MAXH {MAXH}u",
          f"#define ZT_XGAIN {round(0.15 * 32768 * 32768 / gscale)}   /* the wave into the ladder: 0.15, undoing the table's scale ({gscale / 32768:.4f}) */", ""]
-    L.append(f"static const int16_t ZT_GLASS[{FRAMES}][{LEVELS}][{SIZE}] = {{")
-    for fr in g:
-        L.append(" {")
-        for lv in fr:
-            L.append("  {" + ",".join(map(str, lv)) + "},")
-        L.append(" },")
+    L.append(f"static const int16_t ZT_TAB[4][{FRAMES}][{LEVELS}][{SIZE}] = {{   /* AIR, GLASS, VOX, REED */")
+    for t in tabs:
+        L.append("{")
+        for fr in t:
+            L.append(" {")
+            for lv in fr:
+                L.append("  {" + ",".join(map(str, lv)) + "},")
+            L.append(" },")
+        L.append("},")
     L.append("};")
     def arr(name, typ, vals):
         L.append(f"static const {typ} {name}[{len(vals)}] = {{")
@@ -114,6 +157,9 @@ def main():
     arr("ZT_ENV_A", "int32_t", env_a)
     arr("ZT_ENV_DR", "int32_t", env_dr)
     arr("ZT_SIN", "int16_t", sin_t)
+    arr("RV_RT", "int32_t", rv_rt)
+    arr("RV_DAMP", "int32_t", rv_damp)
+    arr("RV_EXP", "int32_t", rv_exp)
     L.append("static const int32_t ZT_DET[1025][4] = {")
     for i in range(0, len(det), 4):
         L.append("  {" + ",".join(map(str, det[i:i + 4])) + "},")

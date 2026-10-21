@@ -20,7 +20,9 @@ int main (int argc, char** argv)
     Settings s; s.padNotes.fill (-1);           // no pads: every note is a key (notes 36-51 would be the plates)
     // Zen-Lite's knob defaults, then the ones given; each knob maps exactly as the firmware maps it (k * 1024 / 127)
     struct { const char* n; int v; } k[] = { {"CUT",79},{"RES",38},{"POS",57},{"MIX",64},{"WAVE",0},{"SHAPE",0},{"DET",25},
-                                             {"TUNE",24},{"ATT",38},{"DEC",64},{"SUS",102},{"REL",76} };
+                                             {"TUNE",24},{"ATT",38},{"DEC",64},{"SUS",102},{"REL",76},
+                                             {"TABLE",1},{"WARP",0},{"CHORUS",0},{"REVERB",0},{"RDECAY",64},{"SHIMMER",0},
+                                             {"SIZE",76},{"DAMP",64},{"DEPTH",64} };
     for (int a = 3; a < argc; ++a)
         for (auto& e : k)
             if (! std::strncmp (argv[a], e.n, std::strlen (e.n)) && argv[a][std::strlen (e.n)] == '=') e.v = std::atoi (argv[a] + std::strlen (e.n) + 1);
@@ -29,12 +31,15 @@ int main (int argc, char** argv)
     const float mix = q ("MIX");
     s.aLevel = std::min (1.0f, (1.0f - mix) * 2.0f); s.bLevel = std::min (1.0f, mix * 2.0f);
     s.aWave = (WaveA) kv ("WAVE"); s.aShape = q ("SHAPE"); s.aDetune = q ("DET"); s.aTune = 0.5f + (kv ("TUNE") - 24) / 48.0f;
-    s.bTable = 1; s.bUnison = 0.0f; s.bWarp = 0.0f; s.air = 0.0f;
+    s.bTable = kv ("TABLE"); s.bUnison = 0.0f; s.bWarp = q ("WARP"); s.air = 0.0f;
     s.bPos = q ("POS"); s.cutoff = q ("CUT"); s.res = q ("RES");
     s.drive = 0.0f; s.envAmt = 0.5f; s.keyTrack = 0.5f;
     s.ampA = q ("ATT"); s.ampD = q ("DEC"); s.ampS = q ("SUS"); s.ampR = q ("REL");
     s.spread = 0.5f; s.volume = 0.857f; s.velSens = 0.5f;
-    s.chorusMix = 0.0f; s.delayMix = 0.0f; s.reverbMix = 0.0f; s.glide = 0.0f;
+    auto fx = [&] (const char* n) { return kv (n) / 127.0f; };   // the effects take the knob straight, as Zen-Lite's
+    s.chorusMix = fx ("CHORUS"); s.chorusDepth = fx ("DEPTH"); s.chorusRate = 0.3f; s.delayMix = 0.0f; s.glide = 0.0f;
+    s.reverbMix = fx ("REVERB"); s.reverbDecay = fx ("RDECAY"); s.reverbShimmer = fx ("SHIMMER");
+    s.reverbSize = fx ("SIZE"); s.reverbDamp = fx ("DAMP");
 
     // the script: "T keys MASK" (bit k = F3 + k), "T midi ST D1 D2", "T btn 1" (octave up), "T end"
     struct Ev { int t; std::vector<MidiEvent> ev; };

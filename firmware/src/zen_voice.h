@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Zen-Lite's voice, after Zenthesizer's (Source/dsp/Voice.h, Engine.h):
  *   Engine A  three analog oscillators (saw / square / triangle / sine; SHAPE; DETUNE spreads the two side ones)
- *   Engine B  the GLASS wavetable, POSITION scanning its eight frames
+ *   Engine B  four wavetables (AIR, GLASS, VOX, REED), POSITION scanning their eight frames, WARP bending the phase
  *   the 4-pole zero-delay ladder, an exponential ADSR, the plugin's stereo spread, and its look-ahead limiter.
  * Integers only (no FPU on the FM-1). Every curve that needs a float is in gen/zen_tables.h.
  *
@@ -31,6 +31,8 @@ static volatile int32_t zp_ashape = 0;          /* SHAPE, Q15 */
 static volatile int32_t zp_adet = 205;          /* DETUNE, Q10 */
 static volatile int32_t zp_atune = 0;           /* TUNE, semitones -24..24 */
 static volatile int32_t zp_again = 32768, zp_bgain = 32768;   /* levels, Q15 (from the A-B mix) */
+static volatile int32_t zp_btable = 1;          /* 0 AIR, 1 GLASS, 2 VOX, 3 REED */
+static volatile int32_t zp_bwarp = 0;           /* WARP, Q15 */
 
 typedef struct {
     /* main loop writes */
@@ -39,7 +41,6 @@ typedef struct {
     volatile int32_t gate;                      /* 1 held, 0 let go */
     volatile int32_t vel;                       /* velocity gain, Q15 */
     volatile int32_t ktrack;                    /* key tracking, added to the cutoff knob (Q10) */
-    volatile uint32_t lv;                       /* band-limited level for this pitch */
     volatile uint8_t note;
     uint8_t chord;                              /* 0 a key or MIDI note, 1..7 a chord's */
     uint32_t age, tag;
@@ -127,13 +128,13 @@ static void zosc_block(int32_t wave, uint32_t *php, uint32_t inc, uint32_t dt, u
         }
         break;
     default: {                                  /* sine; SHAPE adds self-FM */
-        int32_t fb = *fbp;
+        int32_t mem = *fbp;
         for (i = 0; i < ZBLK; i++, ph += inc) {
-            int32_t s = zsin(ph + (uint32_t)(fb * kfm));
-            fb = (fb + s) >> 1;
+            int32_t s = zsin(ph + (uint32_t)(mem * kfm));
+            mem = (mem + s) >> 1;
             out[i] += (s * g) >> 15;
         }
-        *fbp = fb;
+        *fbp = mem;
         break;
     }
     }
@@ -218,7 +219,9 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
         /* control rate: the ladder's coefficients for this cutoff and resonance (Voice.h Ladder) */
         int32_t c = zp_cut + v->ktrack, k = zp_k, G, G2, G3, G4, omg, c0, c1, c2, c3, inv, comp, ff;
         int32_t wave = zp_awave, shape = zp_ashape, pw, foldm, foldk, kfm, side, anorm, kA, kB, dq = zp_adet;
-        uint32_t D, posq, f0, lv = v->lv, ia0, ia1, ia2, dt0, dt1, dt2, iv0, iv1, iv2;
+        uint32_t D, posq, f0, lv = 0, ia0, ia1, ia2, dt0, dt1, dt2, iv0, iv1, iv2, ws1, ws2, wk32, tb = (uint32_t)zp_btable & 3u;
+        int32_t warpK = 16384 - ((14746 * zp_bwarp) >> 15);           /* 0.5 - 0.45 warp, Q15 */
+        uint64_t effinc;
         const int16_t *t0, *t1;
         if (c < 0) c = 0;
         if (c > 1024) c = 1024;
@@ -235,8 +238,14 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
         f0 = posq >> 10;
         if (f0 > ZT_FRAMES - 2u) f0 = ZT_FRAMES - 2u;
         ff = (int32_t)((posq - (f0 << 10)) << 5);                    /* crossfade, Q15 */
-        t0 = ZT_GLASS[f0][lv];
-        t1 = ZT_GLASS[f0 + 1u][lv];
+        ws1 = 0x40000000u / (uint32_t)warpK;                         /* 0.5 / warpK, Q16 */
+        ws2 = 0x40000000u / (uint32_t)(32768 - warpK);               /* 0.5 / (1 - warpK), Q16 */
+        wk32 = (uint32_t)warpK << 17;
+        effinc = ((uint64_t)inc * ws1) >> 16;                          /* warp speeds the first half up */
+        while (lv < ZT_LEVELS - 1u && (ZT_MAXH >> lv) * effinc > 1932735283ull)   /* harmonics under 0.45 fs */
+            lv++;
+        t0 = ZT_TAB[tb][f0][lv];
+        t1 = ZT_TAB[tb][f0 + 1u][lv];
 
         /* Engine A: three pitches (centre, and the side pair DETUNE spreads), each <= 0.45 fs */
         if (dq < 0) dq = 0;
@@ -269,8 +278,10 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
         } else { pa0 += ia0 * ZBLK; pa1 += ia1 * ZBLK; pa2 += ia2 * ZBLK; }
 
         for (i = b; i < b + ZBLK; i++) {
-            uint32_t ix = ph >> 23, ix2 = (ix + 1u) & (ZT_SIZE - 1u);
-            int32_t fr = (int32_t)((ph >> 8) & 0x7FFFu), a0, a1, w = 0, a = ablk[i - b], x, sig, y4, u, vv, y, o;
+            uint32_t bph = !zp_bwarp ? ph : ph < wk32 ? (uint32_t)(((uint64_t)ph * ws1) >> 16)
+                        : 0x80000000u + (uint32_t)(((uint64_t)(ph - wk32) * ws2) >> 16);
+            uint32_t ix = bph >> 23, ix2 = (ix + 1u) & (ZT_SIZE - 1u);
+            int32_t fr = (int32_t)((bph >> 8) & 0x7FFFu), a0, a1, w = 0, a = ablk[i - b], x, sig, y4, u, vv, y, o;
             if (kB) {
                 a0 = t0[ix] + (((t0[ix2] - t0[ix]) * fr) >> 15);
                 a1 = t1[ix] + (((t1[ix2] - t1[ix]) * fr) >> 15);

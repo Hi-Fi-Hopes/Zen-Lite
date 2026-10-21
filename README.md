@@ -6,14 +6,16 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: step 2a
+## Status: step 2b
 
 Six voices of the plugin's two engines into its ladder filter, with its envelope, stereo spread and look-ahead
 limiter at -1 dBFS:
 
 - **Engine A**: three analog oscillators, saw / square / triangle / sine, SHAPE (softens the saw, narrows the
   square, folds the triangle, self-FM on the sine) and DETUNE (spreads the two side oscillators), TUNE in semitones
-- **Engine B**: the GLASS wavetable, POSITION scanning its eight frames
+- **Engine B**: the four wavetables (AIR, GLASS, VOX, REED), POSITION scanning their eight frames, WARP
+- **Effects**: the plugin's chorus and shimmer reverb (the reverb runs at half the sample rate: half the CPU),
+  and a TONE setting for the speaker
 - **The keyboard** plays the key: white keys are the scale, black keys the seven chords
 
 Integer maths only (the FM-1 has no FPU); every curve is computed once by `tools/gen_tables.py` from the plugin's
@@ -35,14 +37,19 @@ Chord notes are the first to give way when all six voices are busy, so a melody 
 | Button | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
 | --- | --- | --- | --- | --- |
 | HOME | CUTOFF | RESONANCE | POSITION | A-B MIX |
-| EDIT | WAVE | SHAPE | DETUNE | TUNE |
+| EDIT | Engine A: WAVE | SHAPE | DETUNE | TUNE |
+| EDIT again | Engine B: TABLE | POSITION | WARP | |
 | ENV | ATTACK | DECAY | SUSTAIN | RELEASE |
+| FX | CHORUS | REVERB | DECAY | SHIMMER |
+| FX again | SIZE | DAMP | DEPTH (chorus) | TONE: FLAT, SOFT, LOW CUT |
 | GLO | KEY | SCALE | KEYS | SPREAD |
+
+TONE shapes the headphones and USB audio too: keep it on FLAT when recording.
 
 OCT- / OCT+ the octave, MASTER the volume; USB-MIDI notes in play chromatically, with velocity. Everything is kept
 when the FM-1 is switched off. The screen's last lines: **CPU** (keep it under 50 %), **LIMIT**, octave, voices.
 
-Next (2b): the AIR, VOX and REED wavetables, chorus and shimmer reverb, an FX page, a tone setting for the speaker.
+Next (step 3): the screens of the mock-ups with a scope on HOME, plates A-D as macros, LFOs and mod envelopes, presets.
 
 ## Install, test, go back
 

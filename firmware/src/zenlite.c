@@ -7,11 +7,14 @@
  *   black keys 8-11  held while you press a chord: 7TH, 9TH, SUS, STRUM
  * In CHROMATIC keys every key plays its own note, as a piano. SEL switches between the two.
  *
- * Pages (the four knobs), by button:
- *   HOME  CUTOFF  RESONANCE  POSITION  A-B MIX
- *   EDIT  Engine A: WAVE  SHAPE  DETUNE  TUNE
- *   ENV   ATTACK  DECAY  SUSTAIN  RELEASE
- *   GLO   KEY  SCALE  KEYS (scale / chromatic)  SPREAD (open chord voicing)
+ * Pages (the four knobs), by button (EDIT and FX: press again for their second page):
+ *   HOME      CUTOFF  RESONANCE  POSITION  A-B MIX
+ *   EDIT      Engine A: WAVE  SHAPE  DETUNE  TUNE
+ *   EDIT x2   Engine B: TABLE  POSITION  WARP
+ *   ENV       ATTACK  DECAY  SUSTAIN  RELEASE
+ *   FX        CHORUS  REVERB  DECAY  SHIMMER
+ *   FX x2     SIZE  DAMP  CHORUS DEPTH  TONE (the speaker: FLAT, SOFT, LOW CUT)
+ *   GLO       KEY  SCALE  KEYS (scale / chromatic)  SPREAD (open chord voicing)
  * OCT- OCT+ the octave; MASTER the volume; USB-MIDI notes in play chromatically, with velocity.
  * The screen's last lines: CPU (keep it under 50 %), LIMIT, the octave, the voices sounding.
  *
@@ -20,21 +23,39 @@
 #include "platform.c"
 #include "zen_voice.h"
 #include "zen_chords.h"
+#include "zen_fx.h"
 #ifdef DINGHY_HOST
 #define FM1_TICKS_PER_US 24u
 #endif
 
-/* ---- the parameters: four pages of four knobs */
+/* ---- the parameters, and the pages that show them (four knobs a page) */
 enum { P_CUT, P_RES, P_POS, P_MIX, P_WAVE, P_SHAPE, P_DET, P_TUNE, P_ATT, P_DEC, P_SUS, P_REL,
-       P_KEY, P_SCALE, P_KEYS, P_SPREAD, P_N };
+       P_KEY, P_SCALE, P_KEYS, P_SPREAD, P_TABLE, P_WARP, P_CHORUS, P_REVERB, P_RDECAY, P_SHIMMER,
+       P_SIZE, P_DAMP, P_DEPTH, P_TONE, P_N, P_NONE = 255 };
 typedef struct { const char *name; uint8_t lo, hi, def; } param_t;
 static const param_t PARAM[P_N] = {
     {"CUTOFF", 0, 127, 79}, {"RESONANCE", 0, 127, 38}, {"POSITION", 0, 127, 57}, {"A-B MIX", 0, 127, 64},
     {"WAVE", 0, 3, 0}, {"SHAPE", 0, 127, 0}, {"DETUNE", 0, 127, 25}, {"TUNE", 0, 48, 24},
     {"ATTACK", 0, 127, 38}, {"DECAY", 0, 127, 64}, {"SUSTAIN", 0, 127, 102}, {"RELEASE", 0, 127, 76},
     {"KEY", 0, 11, 2}, {"SCALE", 1, 10, 3}, {"KEYS", 0, 1, 0}, {"SPREAD", 0, 1, 0},
+    {"TABLE", 0, 3, 1}, {"WARP", 0, 127, 0}, {"CHORUS", 0, 127, 32}, {"REVERB", 0, 127, 38},
+    {"DECAY", 0, 127, 64}, {"SHIMMER", 0, 127, 0}, {"SIZE", 0, 127, 76}, {"DAMP", 0, 127, 64},
+    {"DEPTH", 0, 127, 64}, {"TONE", 0, 2, 0},
 };
-static const char *const PAGE_NAME[4] = {"HOME", "ENGINE A", "ENVELOPE", "KEY + SCALE"};
+#define NPAGES 7u
+static const char *const PAGE_NAME[NPAGES] = {"HOME", "ENGINE A", "ENGINE B", "ENVELOPE", "FX", "SPACE", "KEY + SCALE"};
+static const uint8_t PAGE[NPAGES][4] = {
+    {P_CUT, P_RES, P_POS, P_MIX}, {P_WAVE, P_SHAPE, P_DET, P_TUNE}, {P_TABLE, P_POS, P_WARP, P_NONE},
+    {P_ATT, P_DEC, P_SUS, P_REL}, {P_CHORUS, P_REVERB, P_RDECAY, P_SHIMMER}, {P_SIZE, P_DAMP, P_DEPTH, P_TONE},
+    {P_KEY, P_SCALE, P_KEYS, P_SPREAD},
+};
+#define PG_HOME 0u
+#define PG_A 1u
+#define PG_B 2u
+#define PG_ENV 3u
+#define PG_FX 4u
+#define PG_SPACE 5u
+#define PG_GLO 6u
 
 typedef struct { int8_t oct; uint8_t p[P_N]; } set_t;
 static set_t set;
@@ -51,6 +72,12 @@ static void apply(void)
     zp_adet = q10(set.p[P_DET]);
     zp_atune = (int32_t)set.p[P_TUNE] - 24;
     zen_set_env(q10(set.p[P_ATT]), q10(set.p[P_DEC]), q10(set.p[P_SUS]), q10(set.p[P_REL]));
+    zp_btable = set.p[P_TABLE];
+    zp_bwarp = q10(set.p[P_WARP]) << 5;
+    zf_chorus = set.p[P_CHORUS]; zf_depth = set.p[P_DEPTH];
+    zf_reverb = set.p[P_REVERB]; zf_decay = set.p[P_RDECAY]; zf_shimmer = set.p[P_SHIMMER];
+    zf_size = set.p[P_SIZE]; zf_damp = set.p[P_DAMP]; zf_tone = set.p[P_TONE];
+    rv_set();
 }
 
 /* ---- the sound */
@@ -63,10 +90,13 @@ static void app_audio(int32_t *out, uint32_t n)
 #ifndef DINGHY_HOST
     uint32_t t0 = fm1_ticks(), dt;
 #endif
-    for (i = 0; i < n; i++)
+    for (i = 0; i < n; i++)                     /* (n is always HALF_FRAMES, 256: the effects count on it) */
         mixL[i] = mixR[i] = 0;
     for (v = 0; v < ZV; v++)
         zv_render(v, mixL, mixR, n);
+    chorus(mixL, mixR, n);                      /* the plugin's order: voices, chorus, reverb, then the limiter */
+    reverb(mixL, mixR, n);
+    tone(mixL, mixR, n);
     limiter(mixL, mixR, n);
     for (i = 0; i < n; i++) {
         out[2u * i] += mixL[i];
@@ -83,7 +113,7 @@ static uint32_t ages, tags;
 
 static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
 {
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu, inc, lv = 0;
+    uint32_t v, pick = 0, best = 0xFFFFFFFFu, inc;
     zvoice_t *z;
     if (note > 127u || !vel) return 0;
     for (v = 0; v < ZV; v++) {                  /* a silent voice, else the quietest let-go one, else the oldest */
@@ -92,8 +122,6 @@ static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
         if (score < best) { best = score; pick = v; }    /* (chord notes go before melody notes) */
     }
     inc = zinc((int)note);
-    while (lv < ZT_LEVELS - 1u && (uint64_t)(ZT_MAXH >> lv) * inc > 1932735283ull)   /* harmonics under 0.45 fs */
-        lv++;
     z = &zv[pick];
     z->gate = 0;
     z->note = (uint8_t)note;
@@ -101,7 +129,6 @@ static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
     z->age = ++ages;
     z->tag = ++tags;
     z->inc = inc;
-    z->lv = lv;
     z->vel = (int32_t)(16384u + vel * 129u);    /* velocity sensitivity 0.5: 1 - 0.5 (1 - v), Q15 */
     z->ktrack = ((int32_t)note - 60) * 4348 / 1000;   /* key tracking 0.5, as the plugin */
     z->gate = 1;
@@ -203,10 +230,14 @@ static void num(char *s, int32_t v)            /* v -> decimal text */
 static void value_text(uint32_t p, char *s)
 {
     static const char *const WAVE[4] = {"SAW", "SQUARE", "TRIANGLE", "SINE"};
+    static const char *const TABLE[4] = {"AIR", "GLASS", "VOX", "REED"};
+    static const char *const TONE[3] = {"FLAT", "SOFT", "LOW CUT"};
     uint32_t v = set.p[p];
     s[0] = 0;
     switch (p) {
     case P_WAVE: zcat(s, WAVE[v & 3u]); break;
+    case P_TABLE: zcat(s, TABLE[v & 3u]); break;
+    case P_TONE: zcat(s, TONE[v > 2u ? 0u : v]); break;
     case P_TUNE: if (v > 24u) zcat(s, "+"); num(s + (v > 24u), (int32_t)v - 24); break;
     case P_KEY: zcat(s, znote_name((int)v, zkey_flats((int)v, set.p[P_SCALE]))); break;
     case P_SCALE: zcat(s, ZSCALES[v].name); break;
@@ -218,10 +249,11 @@ static void value_text(uint32_t p, char *s)
 
 static void draw_row(uint32_t page, uint32_t r, int hot)
 {
-    uint32_t p = page * 4u + r;
+    uint32_t p = PAGE[page][r];
     char s[16];
     int32_t y = 88 + (int32_t)r * 24;
     char lab[16] = "1  ";
+    if (p == P_NONE) { lcd_fill(0, (uint32_t)y, 240, 16, C_BLACK); return; }
     lab[0] = (char)('1' + r);
     zcat(lab, PARAM[p].name);
     value_text(p, s);
@@ -351,21 +383,24 @@ static void app_main(void)
         b = fm1_input_edges(&rel);
         if (b & (1u << BTN_OCT_DOWN) && set.oct > -2) { set.oct--; dirty = 1; t_change = fm1_ms; }
         if (b & (1u << BTN_OCT_UP) && set.oct < 2) { set.oct++; dirty = 1; t_change = fm1_ms; }
-        {
-            uint32_t np = b & (1u << BTN_HOME) ? 0u : b & (1u << BTN_EDIT) ? 1u : b & (1u << BTN_ENV) ? 2u
-                        : b & (1u << BTN_GLO) ? 3u : page;
+        {                                       /* EDIT and FX: a second press opens their second page */
+            uint32_t np = b & (1u << BTN_HOME) ? PG_HOME
+                        : b & (1u << BTN_EDIT) ? (page == PG_A ? PG_B : PG_A)
+                        : b & (1u << BTN_ENV) ? PG_ENV
+                        : b & (1u << BTN_FX) ? (page == PG_FX ? PG_SPACE : PG_FX)
+                        : b & (1u << BTN_GLO) ? PG_GLO : page;
             if (np != page) { page = np; hot = 9; draw_page(page); }
         }
         if (b & (1u << BTN_SEL)) {              /* SEL: scale keys <-> chromatic keys */
             set.p[P_KEYS] ^= 1u; dirty = 1; t_change = fm1_ms;
-            if (page == 3u) draw_row(3, 2, 0);
+            if (page == PG_GLO) draw_row(PG_GLO, 2, 0);
             redraw_info = 1;
         }
 
         for (k = 0; k < 4u; k++) {              /* the four knobs: one step a click, faster when turned fast */
-            uint32_t p = page * 4u + k;
+            uint32_t p = PAGE[page][k];
             int32_t d = fm1_enc_take(ENC_KNOB1 + k), nv;
-            if (!d) continue;
+            if (!d || p == P_NONE) continue;
             if (PARAM[p].hi > 20u && (d > 1 || d < -1)) d *= 2;
             nv = (int32_t)set.p[p] + d;
             if (nv < PARAM[p].lo) nv = PARAM[p].lo;
@@ -375,7 +410,7 @@ static void app_main(void)
             if (hot != k && hot < 4u) draw_row(page, hot, 0);
             hot = k; t_hot = fm1_ms;
             draw_row(page, k, 1);
-            if (p >= P_KEY) { last_chord = -1; redraw_info = 1; }
+            if (p >= P_KEY && p <= P_SPREAD) { last_chord = -1; redraw_info = 1; }
             dirty = 1; t_change = fm1_ms;
         }
         if (hot < 4u && fm1_ms - t_hot > 1500u) { draw_row(page, hot, 0); hot = 9; }
@@ -392,10 +427,11 @@ static void app_main(void)
             fm1_led_key(KEY_LED(k), lit >> k & 1u);
         fm1_led_key(BTN_OCT_DOWN, set.oct < 0);
         fm1_led_key(BTN_OCT_UP, set.oct > 0);
-        fm1_led_key(BTN_HOME, page == 0u);
-        fm1_led_key(BTN_EDIT, page == 1u);
-        fm1_led_key(BTN_ENV, page == 2u);
-        fm1_led_key(BTN_GLO, page == 3u);
+        fm1_led_key(BTN_HOME, page == PG_HOME);
+        fm1_led_key(BTN_EDIT, page == PG_A || page == PG_B);
+        fm1_led_key(BTN_ENV, page == PG_ENV);
+        fm1_led_key(BTN_FX, page == PG_FX || page == PG_SPACE);
+        fm1_led_key(BTN_GLO, page == PG_GLO);
         fm1_led_key(BTN_SEL, set.p[P_KEYS] != 0u);
 
         if (fm1_ms - t_stat >= 250u || voices != voices_drawn) {     /* 4 times a second: CPU and limiter */
