@@ -1,0 +1,11 @@
+In file included from firmware/src/zenlite.c:28:
+In file included from firmware/src/zen_voice.h:18:
+firmware/gen/zen_tables.h:881:47: warning: implicit conversion from 'long long' to 'int32_t' (aka 'int') changes value from 2147483648 to -2147483648 [-Wconstant-conversion]
+  2141676973,2143127168,2144578345,2146030505,2147483648,
+                                              ^~~~~~~~~~
+1 warning generated.
+build/zenlite.o: In function `fm1_alnk0_irq':
+firmware/src/zenlite.c:(.text.fm1_alnk0_irq+0x64): relocation truncated to fit: R_PI32V2_LONG_JUMP_23M2 against `app_audio'
+loader: image 8232 B at 0x1c0a800, bss end 0x1c0f400
+loader: ota.bin 6954 B
+build: pi32v2/bin/ld failed
