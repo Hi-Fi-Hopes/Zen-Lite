@@ -59,7 +59,7 @@ int main (int argc, char** argv)
         const presets::Preset* pr = nullptr;
         for (const auto& c : presets::all())
         {
-            std::string u; for (const char* q = c.name; *q; ++q) u += (*q == '"' || *q == '\\') ? ' ' : (char) std::toupper ((unsigned char) *q);
+            std::string u; for (const char* q = c.name; *q; ++q) u += (*q == '"' || *q == '\\') ? ' ' : *q;
             if (u == want) { pr = &c; break; }
         }
         if (! pr) { std::fprintf (stderr, "zen_ref: no plugin preset %s\n", want.c_str()); return 1; }

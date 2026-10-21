@@ -25,8 +25,8 @@ int main()
     std::string body;
     int count = 0, skipped = 0;
     char line[2048];
-    auto emit = [&] (const std::string& name, const int* p, const zps_t* s) {
-        std::string t = "  {\"" + name + "\", {";
+    auto emit = [&] (const std::string& name, const std::string& cat, const int* p, const zps_t* s) {
+        std::string t = "  {\"" + name + "\", \"" + cat + "\", {";
         for (int i = 0; i < P_N; ++i) t += std::to_string (p[i]) + (i + 1 < P_N ? "," : "");
         t += "}, {";
         for (int i = 0; i < ZM_NSLOTS; ++i)
@@ -43,7 +43,7 @@ int main()
         int p[P_N]; zps_t s[ZM_NSLOTS] {};
         for (int i = 0; i < P_N; ++i) p[i] = PARAM[i].def;
         for (int i = 0; i < 7; ++i) s[i] = ZKIT[i];
-        emit ("ZEN-LITE", p, s);
+        emit ("Zen-Lite", "Zen-Lite", p, s);
     }
     for (const auto& pr : all)
     {
@@ -101,9 +101,8 @@ int main()
             s[n].amt = (int16_t) std::lround (std::min (1.0f, std::max (-1.0f, sl.amt)) * 1024.0f);
             ++n;
         }
-        std::string name;
-        for (const char* c = pr.name; *c; ++c) name += (*c == '"' || *c == '\\') ? ' ' : (char) std::toupper ((unsigned char) *c);
-        emit (name, p, s);
+        auto clean = [] (const char* c) { std::string o; for (; *c; ++c) o += (*c == '"' || *c == '\\') ? ' ' : *c; return o; };
+        emit (clean (pr.name), clean (pr.category), p, s);
     }
     std::printf ("#define ZPRESETS %d\nstatic const zpreset_t ZPRESET[ZPRESETS] = {\n%s};\n#endif\n", count, body.c_str());
     std::fprintf (stderr, "%d presets (%d skipped)\n", count, skipped);

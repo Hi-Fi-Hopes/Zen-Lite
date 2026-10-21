@@ -173,6 +173,7 @@ static void app_audio(int32_t *out, uint32_t n) { zl_audio_fn(out, n); }
 
 /* ---- voices: a note gets a tag, and is let go by its tag (a chord and a key may share a note) */
 static uint32_t ages, tags, last_started = 60;
+static void ripple_start(void);
 
 static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
 {
@@ -197,6 +198,7 @@ static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
     last_started = note;
     z->gate = 1;
     z->trig++;
+    ripple_start();
     return z->tag;
 }
 static void release_tag(uint32_t tag)
@@ -276,10 +278,6 @@ static void strum_tick(void)
 }
 
 /* ---- the screen */
-#define ZC_BRASS RGB(217, 169, 74)
-#define ZC_BONE RGB(240, 230, 208)
-#define ZC_DIM RGB(120, 110, 96)
-#define ZC_AMBER RGB(255, 179, 71)
 
 static void num(char *s, int32_t v)            /* v -> decimal text */
 {
@@ -328,10 +326,10 @@ static void value_text(uint32_t p, char *s)
     case P_TUNE: if (v > 24u) zcat(s, "+"); num(s + (v > 24u), (int32_t)v - 24); break;
     case P_ENVAMT: percent(s, bip10(v)); break;
     case P_L1RATE: case P_L2RATE: case P_RRATE:     /* Hz: the per-block step x 44100 / 16 / 2^32 */
-        fixed2(s, (uint32_t)(((uint64_t)ZT_LFO_INC[q10(v)] * 275625u) >> 32)); zcat(s, " HZ"); break;
+        fixed2(s, (uint32_t)(((uint64_t)ZT_LFO_INC[q10(v)] * 275625u) >> 32)); zcat(s, " Hz"); break;
     case P_DTIME: {
         uint32_t ms = (uint32_t)(DL_TIME[v & 127u] >> 8) * 1000u / 22050u;
-        if (ms < 1000u) { num(s, (int32_t)ms); zcat(s, " MS"); } else { fixed2(s, ms / 10u); zcat(s, " S"); }
+        if (ms < 1000u) { num(s, (int32_t)ms); zcat(s, " ms"); } else { fixed2(s, ms / 10u); zcat(s, " s"); }
         break;
     }
     case P_KEY: zcat(s, znote_name((int)v, zkey_flats((int)v, set.p[P_SCALE]))); break;
@@ -346,18 +344,28 @@ static void value_text(uint32_t p, char *s)
     }
 }
 
-/* ---- the screen, after the mock-ups: a header (the page; the limiter and CPU), the scope in the middle (with the
- * preset's name on HOME, and the chord, the key or the knob being turned along its foot), four cards along the
- * bottom, one a knob: its name, its value, a bar. The screen is drawn in three strips through gfx.c's canvas. */
-#define Y_SCOPE 22u
-#define H_SCOPE 124u
-#define Y_CARDS 146u
-#define H_CARDS 94u
+/* ---- the screen, after the mock-ups (Zenthesizer's theme and fonts): a plank along the top (the page, the CPU),
+ * the wood in the middle (on HOME the slab, the preset's name on its band, a ring around it that breathes with the
+ * sound, a ripple for each note, a bead for each voice; elsewhere the slab dimmed, the sound burned across it), and
+ * a plank of four cards along the bottom, one a knob. Drawn in strips of 64 rows (the canvas), text and lines
+ * blended onto the wood. The pictures and fonts are made once on a computer: tools/gen_art.py -> gen/zen_art.h. */
+#include "zen_art.h"
+#define Y_MID 20u                               /* the middle: 174 rows (ZA_H) */
+#define Y_CARDS 194u
+#define H_CARDS 46u
 #define STRIP 64u                               /* the canvas: 240 x 64 at most (platform.c CV_MAX) */
-#define ZC_EDGE RGB(74, 56, 30)                 /* the rules */
-#define ZC_WAVE RGB(255, 196, 92)
-#define ZC_GLOW RGB(110, 70, 22)
-static const uint16_t PLATE_C[4] = {RGB(232, 84, 62), RGB(240, 152, 52), RGB(86, 164, 232), RGB(96, 204, 124)};
+#define T_GLASS 0x0D0906u                       /* the theme (Zenthesizer Source/ui/Theme.h), 24-bit */
+#define T_BRASS 0xD9A94Au
+#define T_BRASSLO 0x9A6A1Fu
+#define T_BRASSDK 0x6E4A14u
+#define T_BRASSHI 0xFFF1C2u
+#define T_BONE 0xF0E6D0u
+#define T_STEEL 0xB8BCC2u
+#define T_WALNUT 0x4A2E18u
+#define T_WALNUTLO 0x2E1A0Bu
+#define T_GLOW 0xF3D9A4u
+#define T_AMBER 0xFFB347u
+static const uint32_t PLATE_T[4] = {0xFF5A3Cu, 0xFFB347u, 0x7CC7FFu, 0x8BE07Au};   /* BLOOM MORPH ECHOES SPACE */
 static const char *const SHORT[P_N] = {"BLOOM", "MORPH", "ECHOES", "SPACE", "CUTOFF", "RES", "DRIVE", "ENV AMT",
     "WAVE", "SHAPE", "DETUNE", "LEVEL", "TABLE", "POS", "WARP", "LEVEL", "TUNE", "GLIDE", "VEL", "VOLUME",
     "ATTACK", "DECAY", "SUSTAIN", "RELEASE", "ATTACK", "DECAY", "SUSTAIN", "RELEASE",
@@ -388,7 +396,7 @@ static void value_short(uint32_t p, char *s)    /* a card's value: 7 characters 
         fixed2(s, (uint32_t)(((uint64_t)ZT_LFO_INC[q10(v)] * 275625u) >> 32)); break;
     case P_DTIME: {
         uint32_t ms = (uint32_t)(DL_TIME[v & 127u] >> 8) * 1000u / 22050u;
-        if (ms < 1000u) { num(s, (int32_t)ms); zcat(s, "MS"); } else { fixed2(s, ms / 10u); zcat(s, "S"); }
+        if (ms < 1000u) { num(s, (int32_t)ms); zcat(s, " ms"); } else { fixed2(s, ms / 10u); zcat(s, " s"); }
         break;
     }
     case P_SCALE: zcat(s, SCALE_SHORT[v > 10u ? 0u : v]); break;
@@ -411,129 +419,313 @@ static uint32_t bar_of(uint32_t p)              /* a card's bar, 0..1024 */
     return (uint32_t)a;
 }
 
-/* the header: the page's name; on the right the limiter (when it works), DROP (the guard), CPU */
+/* ---- drawing onto the canvas, blended (colours 24-bit 0xRRGGBB, alpha 0..256) */
+static uint16_t za_pal[256], za_dim[256];       /* the slab's colours as the canvas holds them; dimmed for the pages */
+static void za_init(void)
+{
+    uint32_t i;
+    for (i = 0; i < 256u; i++) {
+        uint32_t c = ZA_PAL[i], r = c >> 11, g = (c >> 5) & 63u, b = c & 31u;
+        za_pal[i] = swap16(c);
+        za_dim[i] = swap16(((r * 70u >> 8) << 11) | ((g * 70u >> 8) << 5) | (b * 70u >> 8));
+    }
+}
+static void zb_px(int32_t x, int32_t y, uint32_t c, uint32_t a)
+{
+    uint16_t *p;
+    uint32_t b;
+    int32_t r0, g0, b0;
+    y += cv_oy;
+    if ((uint32_t)x >= cv_w || (uint32_t)y >= cv_h || !a) return;
+    p = &cv_px[(uint32_t)y * cv_w + (uint32_t)x];
+    b = swap16(*p);
+    r0 = (int32_t)(b >> 11); g0 = (int32_t)((b >> 5) & 63u); b0 = (int32_t)(b & 31u);
+    r0 += ((((int32_t)(c >> 19) & 31) - r0) * (int32_t)a) >> 8;
+    g0 += ((((int32_t)(c >> 10) & 63) - g0) * (int32_t)a) >> 8;
+    b0 += ((((int32_t)(c >> 3) & 31) - b0) * (int32_t)a) >> 8;
+    *p = swap16(((uint32_t)r0 << 11) | ((uint32_t)g0 << 5) | (uint32_t)b0);
+}
+static void zb_rect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t c, uint32_t a)
+{
+    int32_t i, j;
+    for (j = y; j < y + h; j++)
+        if ((uint32_t)(j + cv_oy) < cv_h)
+            for (i = x; i < x + w; i++) zb_px(i, j, c, a);
+}
+static int32_t zb_textw(const felucca_font_t *f, const char *s, int32_t track)
+{
+    int32_t w = 0;
+    for (; *s; s++) w += f->adv[glyph(f, (uint8_t)*s)] + track;
+    return w ? w - track : 0;
+}
+static int32_t zb_text(int32_t x, int32_t y, const felucca_font_t *f, const char *s, uint32_t c, int32_t track)
+{
+    if (y + (int32_t)f->h + cv_oy < 0 || y + cv_oy >= (int32_t)cv_h) return x;   /* not in this strip */
+    for (; *s; s++) {
+        uint32_t gi = glyph(f, (uint8_t)*s), gx, gy, w = f->bw[gi], bpr = (w + 1u) / 2u;
+        const uint8_t *gd = f->data + f->off[gi];
+        for (gy = 0; gy < f->h; gy++)
+            for (gx = 0; gx < w; gx++) {
+                uint32_t v = gd[gy * bpr + gx / 2u];
+                v = (gx & 1u) ? (v & 15u) : (v >> 4);
+                if (v) zb_px(x - f->pad + (int32_t)gx, y + (int32_t)gy, c, v * 17u + 1u);
+            }
+        x += f->adv[gi] + track;
+    }
+    return x;
+}
+static void zb_textc(int32_t cx, int32_t y, const felucca_font_t *f, const char *s, uint32_t c, int32_t track)
+{
+    zb_text(cx - zb_textw(f, s, track) / 2, y, f, s, c, track);
+}
+static void zb_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t c, uint32_t a)
+{
+    int32_t dx = x1 > x0 ? x1 - x0 : x0 - x1, sx = x0 < x1 ? 1 : -1;
+    int32_t dy = y1 > y0 ? y0 - y1 : y1 - y0, sy = y0 < y1 ? 1 : -1, err = dx + dy, guard = 600;
+    while (guard--) {
+        int32_t e2 = 2 * err;
+        zb_px(x0, y0, c, a);
+        if (x0 == x1 && y0 == y1) break;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+static void zb_ring(int32_t cx, int32_t cy, int32_t r, uint32_t c, uint32_t a)   /* a circle, dot by dot */
+{
+    uint32_t n = (uint32_t)(r > 4 ? r : 4) * 7u, i, step = 0xFFFFFFFFu / n;
+    for (i = 0; i < n; i++) {
+        uint32_t ph = i * step;
+        zb_px(cx + ((r * zsin(ph)) >> 15), cy + ((r * zsin(ph + 0x40000000u)) >> 15), c, a);
+    }
+}
+static void zb_disc(int32_t cx, int32_t cy, int32_t r, uint32_t c, uint32_t a)    /* a dot, its edge softened */
+{
+    int32_t x, y, rr = r * r, ro = (r + 1) * (r + 1);
+    for (y = -r - 1; y <= r + 1; y++)
+        for (x = -r - 1; x <= r + 1; x++) {
+            int32_t d = x * x + y * y;
+            if (d <= rr) zb_px(cx + x, cy + y, c, a);
+            else if (d <= ro) zb_px(cx + x, cy + y, c, a / 3u);
+        }
+}
+
+/* ---- the header: a plank; the page's name in brass capitals; HOME: the preset's family and number; the rest:
+ * the limiter (when it works), DROP (the guard), CPU */
 static uint32_t ui_cpu, ui_drop;
 static int32_t ui_lim;
 static void ui_header(uint32_t page)
 {
-    char r[32], t[12];
+    char r[40], t[12];
+    const felucca_font_t *lf = &ZF_LAB, *tf = &ZF_TXT;
     r[0] = 0;
-    cv_begin(240, 22, C_BLACK);
-    cv_text(6, 2, &FONT_S, page == PG_HOME ? "ZEN-LITE" : PAGE_NAME[page], ZC_BRASS);
-    if (ui_lim > 0) {
-        zcat(r, "-"); num(t, ui_lim / 10); zcat(r, t); zcat(r, "."); t[0] = (char)('0' + ui_lim % 10); t[1] = 0;
-        zcat(r, t); zcat(r, "DB ");
+    cv_begin(240, Y_MID, swap16(0));
+    zb_rect(0, 0, 240, (int32_t)Y_MID - 1, T_GLASS, 256);
+    zb_rect(0, (int32_t)Y_MID - 1, 240, 1, T_BRASSDK, 256);
+    zb_text(8, 10 - (int32_t)lf->h / 2, lf, page == PG_HOME ? "ZEN" : PAGE_NAME[page], T_BRASS, 1);
+    if (page == PG_HOME) {
+        const char *cat = ZPRESET[set.preset % ZPRESETS].cat, *sl = cat;
+        char u[40];
+        uint32_t i = 0;
+        while (*sl) if (*sl++ == '/') cat = sl;    /* "World/Asia": ASIA */
+        while (cat[i] && i < 39u) { u[i] = (char)(cat[i] >= 'a' && cat[i] <= 'z' ? cat[i] - 32 : cat[i]); i++; }
+        u[i] = 0;
+        zb_textc(120, 10 - (int32_t)lf->h / 2, lf, u, T_STEEL, 1);
+        num(t, (int32_t)set.preset); zcat(r, t); zcat(r, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(r, t);
+        zb_text(232 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, T_STEEL, 0);
+    } else {
+        if (ui_lim > 0) {
+            zcat(r, "-"); num(t, ui_lim / 10); zcat(r, t); zcat(r, "."); t[0] = (char)('0' + ui_lim % 10); t[1] = 0;
+            zcat(r, t); zcat(r, " dB   ");
+        }
+        if (ui_drop) zcat(r, "DROP   ");
+        zcat(r, "CPU "); num(t, (int32_t)ui_cpu); zcat(r, t); zcat(r, "%");
+        zb_text(232 - zb_textw(tf, r, 0), 10 - (int32_t)tf->h / 2, tf, r, ui_drop || ui_cpu > 75u ? T_AMBER : T_STEEL, 0);
     }
-    if (ui_drop) zcat(r, "DROP ");
-    zcat(r, "CPU "); num(t, (int32_t)ui_cpu); zcat(r, t); zcat(r, "%");
-    cv_text(234 - text_w(&FONT_S, r), 2, &FONT_S, r, ui_drop || ui_cpu > 75u ? ZC_AMBER : ZC_DIM);
-    cv_rect(0, 21, 240, 1, ZC_EDGE);
     cv_blit(0, 0);
 }
 
-/* the cards: knob 1-4, left to right; the one being turned is lit */
+/* ---- the cards: a plank, knob 1-4 left to right; a small capital name, the value, a bar (from the middle for the
+ * two-way ones); the one being turned is lit */
 static void ui_cards(uint32_t page, uint32_t hot)
 {
-    uint32_t r, r0;
-    for (r0 = 0; r0 < H_CARDS; r0 += STRIP) {  /* in strips: the canvas holds 64 rows */
-    cv_begin(240, H_CARDS - r0 > STRIP ? STRIP : H_CARDS - r0, C_BLACK);
-    cv_oy = -(int32_t)r0;
+    uint32_t r;
+    const felucca_font_t *lf = &ZF_LAB, *vf = &ZF_VAL;
+    cv_begin(240, H_CARDS, swap16(0));
+    zb_rect(0, 0, 240, (int32_t)H_CARDS, T_GLASS, 256);
+    zb_rect(0, 0, 240, 1, T_BRASSDK, 256);
     for (r = 0; r < 4u; r++) {
-        uint32_t p = page_param(page, r), w;
-        int32_t x = (int32_t)r * 60, tw;
-        uint16_t c = page == PG_HOME ? PLATE_C[r] : ZC_AMBER;
+        uint32_t p = page_param(page, r), c = page == PG_HOME ? PLATE_T[r] : T_BRASS;
+        int32_t x = (int32_t)r * 60, bx0 = x + 9, bx1 = x + 51, w;
         char v[16];
         const char *lab = p < P_N ? SHORT[p] : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT];
-        if (r) cv_rect(x, 6, 1, H_CARDS - 12, ZC_EDGE);
-        cv_text(x + (60 - text_w(&FONT_S, lab)) / 2, 6, &FONT_S, lab, r == hot ? ZC_BONE : ZC_BRASS);
+        if (r) zb_rect(x, 6, 1, (int32_t)H_CARDS - 10, T_WALNUT, 256);
+        zb_textc(x + 30, 11 - (int32_t)lf->h / 2, lf, lab, r == hot ? T_AMBER : T_BRASSLO, 1);
         value_short(p, v);
-        tw = text_w(&FONT_L, v);
-        if (tw <= 56) cv_text(x + (60 - tw) / 2, 30, &FONT_L, v, ZC_BONE);
-        else cv_text(x + (60 - text_w(&FONT_S, v)) / 2, 38, &FONT_S, v, ZC_BONE);
-        w = bar_of(p) * 48u / 1024u;
-        cv_rect(x + 6, 74, 48, 3, ZC_EDGE);
-        cv_rect(x + 6, 74, (int32_t)w, 3, c);
+        if (zb_textw(vf, v, 0) <= 56) zb_textc(x + 30, 26 - (int32_t)vf->h / 2, vf, v, r == hot ? T_BRASSHI : T_BONE, 0);
+        else zb_textc(x + 30, 26 - (int32_t)ZF_TXT.h / 2, &ZF_TXT, v, r == hot ? T_BRASSHI : T_BONE, 0);
+        zb_rect(bx0, 39, bx1 - bx0, 2, T_WALNUTLO, 256);
+        if (p == P_ENVAMT || p == P_MAMT) {     /* two-way: from the middle */
+            int32_t q = p == P_ENVAMT ? bip10(set.p[p]) : set.slot[mod_sel].amt, mid = (bx0 + bx1) / 2;
+            w = q * (bx1 - bx0) / 2048;
+            if (w >= 0) zb_rect(mid, 39, w, 2, c, 256); else zb_rect(mid + w, 39, -w, 2, c, 256);
+        } else {
+            w = (int32_t)(bar_of(p) * (uint32_t)(bx1 - bx0) / 1024u);
+            zb_rect(bx0, 39, w, 2, c, 256);
+        }
     }
-    cv_blit(0, Y_CARDS + r0);
-    }
-    cv_oy = 0;
+    cv_blit(0, Y_CARDS);
 }
 
-/* the scope: the last 1024 samples of the output (the audio interrupt writes them); a rising zero crossing holds
- * the wave still, two samples a pixel (11 ms across), the height follows the level (up to x 8) */
+/* ---- the middle */
+#define SC_PTS 240u
 static int32_t sc_peak = 4096;
-static void ui_scope(uint32_t page, uint32_t hot)
+static struct { uint32_t t0, on; } ripple[4];
+static uint32_t ripple_last, mid_dirty = 1;
+static void ripple_start(void)                  /* a note: a ripple from the pith (one per 60 ms: a chord makes one) */
+{
+    uint32_t k, old = 0;
+    if (fm1_ms - ripple_last < 60u) return;
+    ripple_last = fm1_ms;
+    for (k = 1; k < 4u; k++) if (!ripple[k].on || (ripple[old].on && ripple[k].t0 < ripple[old].t0)) old = k;
+    ripple[old].t0 = fm1_ms; ripple[old].on = 1;
+}
+static uint32_t ui_live(void)                   /* is anything moving? */
+{
+    uint32_t k;
+    for (k = 0; k < 4u; k++) if (ripple[k].on) return 1;
+    return sc_peak > 300;
+}
+
+/* the sound, as 240 points: the last 1024 output samples (the audio interrupt writes them), from a rising zero
+ * crossing, two samples a point; the height follows the level */
+static void sc_points(int32_t *ys, int32_t half)
 {
     static int16_t snap[SC_N];
-    static int16_t ys[240];
-    uint32_t w = sc_w, i, t0 = 0, x, r0;
-    int32_t pk = 0, g, mid, half;
-    char s[40], num_s[16];
+    uint32_t w = sc_w, i, t0 = 0, x;
+    int32_t pk = 0, g;
     for (i = 0; i < SC_N; i++) {
         snap[i] = sc_ring[(w + i) & (SC_N - 1u)];
         if (snap[i] > pk) pk = snap[i];
         if (-snap[i] > pk) pk = -snap[i];
     }
-    sc_peak = pk > sc_peak ? pk : sc_peak - ((sc_peak - pk) >> 4);
-    if (sc_peak < 2048) sc_peak = 2048;
-    {                                           /* the wave's band: under the name on HOME, over the foot's text */
-        int32_t top = page == PG_HOME ? 56 : 6, bot = (int32_t)H_SCOPE - 24;
-        mid = (top + bot) / 2; half = (bot - top) / 2;
-    }
-    g = (half << 16) / sc_peak;                 /* px per sample unit, Q16: the peak at the band's edge */
-    for (i = 1; i < SC_N - 480u; i++)           /* the first rising zero crossing */
+    sc_peak = pk > sc_peak ? pk : sc_peak - ((sc_peak - pk) >> 3);
+    g = (half << 16) / (sc_peak < 2048 ? 2048 : sc_peak);
+    for (i = 1; i < SC_N - 2u * SC_PTS; i++)
         if (snap[i - 1] < 0 && snap[i] >= 0) { t0 = i; break; }
-    for (x = 0; x < 240u; x++) {
-        int32_t a = (snap[t0 + 2u * x] + snap[t0 + 2u * x + 1u]) >> 1, y = mid - ((a * g) >> 16);
-        ys[x] = (int16_t)(y < mid - half ? mid - half : y > mid + half ? mid + half : y);
+    for (x = 0; x < SC_PTS; x++) {
+        int32_t a = (snap[t0 + 2u * x] + snap[t0 + 2u * x + 1u]) >> 1, y = (a * g) >> 16;
+        ys[x] = y > half ? half : y < -half ? -half : y;
     }
-    num_s[0] = 0;
-    {
-        char t[12];
-        num(t, (int32_t)set.preset); zcat(num_s, t); zcat(num_s, " / "); num(t, (int32_t)ZPRESETS - 1); zcat(num_s, t);
-    }
+    if (pk < 64) sc_peak = sc_peak > 2048 ? sc_peak : 0;   /* silence: nothing moves */
+}
+
+static uint32_t scope_on = 1;                   /* SAVE: the motion off (a still picture) and on */
+static void ui_mid(uint32_t page, uint32_t hot)
+{
+    static int32_t ys[SC_PTS];
+    uint32_t r0, k, x;
+    char s[48];
+    uint32_t foot_c;
+    const felucca_font_t *nf = &ZF_NAME, *tf = &ZF_TXT;
+    const char *nm = ZPRESET[set.preset % ZPRESETS].name;
+    int32_t foot_y, i;
+    if (scope_on) sc_points(ys, page == PG_HOME ? 9 : 52);
+    else for (x = 0; x < SC_PTS; x++) ys[x] = 0;
+    for (k = 0; k < 4u; k++)                    /* ripples: 0.9 s from the pith to the bark */
+        if (ripple[k].on && fm1_ms - ripple[k].t0 > 900u) ripple[k].on = 0;
+
     s[0] = 0;                                   /* the foot: the knob being turned, else the chord, else the key */
     if (hot < 4u) {
         uint32_t p = page_param(page, hot);
         char v[24];
         zcat(s, p < P_N ? PARAM[p].name : (const char *[]){"SLOT", "SOURCE", "DEST", "AMOUNT"}[p - P_MSLOT]);
-        zcat(s, "  ");
-        value_text(p, v); zcat(s, v);
-    } else if (set.p[P_KEYS]) zcat(s, "CHROMATIC KEYS");
-    else if (last_chord >= 0) zcat(s, chord_text);
+        zcat(s, "   "); value_text(p, v); zcat(s, v);
+        foot_c = T_BRASSHI;
+    } else if (set.p[P_KEYS]) { zcat(s, "chromatic keys"); foot_c = T_STEEL; }
+    else if (last_chord >= 0) { zcat(s, chord_text); foot_c = T_AMBER; }
     else {
         zcat(s, znote_name(set.p[P_KEY], zkey_flats(set.p[P_KEY], set.p[P_SCALE])));
         zcat(s, " "); zcat(s, ZSCALES[set.p[P_SCALE]].name);
+        foot_c = T_STEEL;
     }
-    if (set.oct) { char t[8] = "  OCT +"; t[6] = set.oct < 0 ? '-' : '+'; t[7] = 0; zcat(s, t);
+    if (set.oct) { char t[12] = "   oct +"; t[7] = set.oct < 0 ? '-' : '+'; zcat(s, t);
                    t[0] = (char)('0' + (set.oct < 0 ? -set.oct : set.oct)); t[1] = 0; zcat(s, t); }
-    for (r0 = 0; r0 < H_SCOPE; r0 += STRIP) {  /* in strips: the canvas holds 64 rows */
-        cv_begin(240, H_SCOPE - r0 > STRIP ? STRIP : H_SCOPE - r0, C_BLACK);
+    foot_y = page == PG_HOME ? 158 : 152;
+
+    for (r0 = 0; r0 < ZA_H; r0 += STRIP) {
+        uint32_t h = ZA_H - r0 > STRIP ? STRIP : ZA_H - r0, row;
+        const uint16_t *wpal = page == PG_HOME ? za_pal : za_dim;
+        cv_begin(240, h, swap16(0));
+        for (row = 0; row < h; row++) {         /* the wood */
+            const uint8_t *src = ZA_SLAB + (r0 + row) * ZA_W;
+            uint16_t *dst = cv_px + row * 240u;
+            for (x = 0; x < 240u; x++) dst[x] = wpal[src[x]];
+        }
         cv_oy = -(int32_t)r0;
-        cv_rect(0, mid, 240, 1, ZC_EDGE);
-        for (x = 1; x < 240u; x++) {
-            cv_line((int32_t)x - 1, ys[x - 1] + 1, (int32_t)x, ys[x] + 1, ZC_GLOW);
-            cv_line((int32_t)x - 1, ys[x - 1], (int32_t)x, ys[x], ZC_WAVE);
+        if (page == PG_HOME) {
+            for (k = 0; k < 4u; k++)            /* ripples, from the pith outward, fading */
+                if (ripple[k].on) {
+                    uint32_t t = fm1_ms - ripple[k].t0;
+                    int32_t rr = 4 + (int32_t)(t * (ZA_R + 2) / 900u);
+                    uint32_t a = 256u - t * 256u / 900u;
+                    zb_ring(ZA_CX, ZA_CY, rr, 0x3B1F0Cu, a);           /* burned into the rings */
+                    zb_ring(ZA_CX, ZA_CY, rr + 1, 0x3B1F0Cu, a * 3u / 4u);
+                    zb_ring(ZA_CX, ZA_CY, rr - 1, T_BRASSHI, a / 2u);
+                }
+            for (x = 0; x < SC_PTS; x++) {      /* the ring around the bark: the sound, breathing */
+                uint32_t ph0 = x * (0xFFFFFFFFu / SC_PTS), ph1 = (x + 1u) * (0xFFFFFFFFu / SC_PTS);
+                int32_t ea = x < 24u ? (int32_t)x : x > SC_PTS - 25u ? (int32_t)(SC_PTS - 1u - x) : 24;   /* at rest at */
+                int32_t eb = x + 1u < 24u ? (int32_t)x + 1 : x + 1u > SC_PTS - 25u ? (int32_t)(SC_PTS - 2u - x) : 24;   /* the seam */
+                int32_t ra = ZA_R + 9 + ys[x] * ea / 24, rb = ZA_R + 9 + ys[(x + 1u) % SC_PTS] * (eb < 0 ? 0 : eb) / 24;
+                int32_t xa = ZA_CX + ((ra * zsin(ph0)) >> 15), ya = ZA_CY - ((ra * zsin(ph0 + 0x40000000u)) >> 15);
+                int32_t xb = ZA_CX + ((rb * zsin(ph1)) >> 15), yb = ZA_CY - ((rb * zsin(ph1 + 0x40000000u)) >> 15);
+                zb_line(xa, ya + 1, xb, yb + 1, T_AMBER, 70);
+                zb_line(xa, ya, xb, yb, T_GLOW, 220);
+            }
+            {                                   /* the band across the slab, and the name on it */
+                int32_t bh = (int32_t)nf->h + 2, by = ZA_CY - bh / 2, bw = zb_textw(nf, nm, 0) + 28;
+                if (bw > 220) bw = 220;
+                if (bw < 120) bw = 120;
+                zb_rect(120 - bw / 2 + 3, by, bw - 6, bh, T_GLASS, 190);
+                zb_rect(120 - bw / 2, by + 3, 3, bh - 6, T_GLASS, 190);
+                zb_rect(120 + bw / 2 - 3, by + 3, 3, bh - 6, T_GLASS, 190);
+                if (zb_textw(nf, nm, 0) <= 216) zb_textc(120, by + 1, nf, nm, T_BONE, 0);
+                else zb_textc(120, ZA_CY - (int32_t)ZF_VAL.h / 2, &ZF_VAL, nm, T_BONE, 0);
+            }
+            for (i = 0; i < (int32_t)ZV; i++) { /* a bead for each voice: lit while it sounds */
+                static const int8_t BX[ZV] = {82, 41, -41, -82, -41, 41}, BY[ZV] = {0, -71, -71, 0, 71, 71};
+                if (zv[i].stage) { zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 4, T_AMBER, 70); zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 2, T_GLOW, 256); }
+                else zb_disc(ZA_CX + BX[i], ZA_CY + BY[i], 2, 0x3A2414u, 256);
+            }
+        } else {                                /* the sound, burned across the wood */
+            for (x = 1; x < SC_PTS; x++) {
+                zb_line((int32_t)x - 1, 78 - ys[x - 1] + 1, (int32_t)x, 78 - ys[x] + 1, T_AMBER, 80);
+                zb_line((int32_t)x - 1, 78 - ys[x - 1] - 1, (int32_t)x, 78 - ys[x] - 1, T_AMBER, 50);
+                zb_line((int32_t)x - 1, 78 - ys[x - 1], (int32_t)x, 78 - ys[x], T_GLOW, 230);
+            }
         }
-        if (page == PG_HOME) {                  /* the preset, and where it is in the list */
-            const char *nm = ZPRESET[set.preset % ZPRESETS].name;
-            if (text_w(&FONT_L, nm) <= 232) cv_text((240 - text_w(&FONT_L, nm)) / 2, 4, &FONT_L, nm, ZC_BRASS);
-            else cv_text((240 - text_w(&FONT_S, nm)) / 2, 12, &FONT_S, nm, ZC_BRASS);
-            cv_text((240 - text_w(&FONT_S, num_s)) / 2, 36, &FONT_S, num_s, ZC_DIM);
+        if (last_chord >= 0 && hot >= 4u && !set.p[P_KEYS] && page != PG_HOME)
+            zb_textc(120, foot_y - 6, nf, s, foot_c, 0);   /* a chord: in the serif */
+        else
+            zb_textc(120, foot_y, tf, s, foot_c, 0);
+        if (page == PG_HOME) {                  /* HOME has no CPU in its header: here, small */
+            char c[24], t[8];
+            c[0] = 0;
+            if (ui_drop) zcat(c, "DROP  ");
+            num(t, (int32_t)ui_cpu); zcat(c, t); zcat(c, "%");
+            zb_text(234 - zb_textw(tf, c, 0), 4, tf, c, ui_drop || ui_cpu > 75u ? T_AMBER : T_BRASSLO, 0);
         }
-        cv_text((240 - text_w(&FONT_S, s)) / 2, (int32_t)H_SCOPE - 20, &FONT_S, s,
-                hot < 4u ? ZC_BONE : last_chord >= 0 && !set.p[P_KEYS] ? ZC_AMBER : ZC_DIM);
-        cv_blit(0, Y_SCOPE + r0);
+        cv_blit(0, Y_MID + r0);
     }
     cv_oy = 0;
+    mid_dirty = 0;
 }
 
-static uint32_t scope_on = 1;
 static void draw_page(uint32_t page)
 {
     ui_header(page);
     ui_cards(page, 9);
-    if (scope_on) ui_scope(page, 9);
+    ui_mid(page, 9);
 }
 
 static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenths of a dB (0.1 dB = x 0.98855) */
@@ -572,6 +764,7 @@ static void app_main(void)
     map_keys();
     apply();
 
+    za_init();
     lcd_fill(0, 0, 240, 240, C_BLACK);
     draw_page(page);
 
@@ -611,6 +804,7 @@ static void app_main(void)
                 } else if (black_of[k] < 7) {
                     chord_down((uint32_t)black_of[k], m7, m9, sus, strum);
                     key_chord[k] = black_of[k];
+                    mid_dirty = 1;
                 }
             }
         }
@@ -631,6 +825,7 @@ static void app_main(void)
         if (b & (1u << BTN_SEL)) {              /* SEL: scale keys <-> chromatic keys */
             set.p[P_KEYS] ^= 1u; dirty = 1; t_change = fm1_ms;
             if (page == PG_GLO) ui_cards(page, hot);
+            mid_dirty = 1;
         }
 
         pd = fm1_enc_take(ENC_PRESETS);         /* PRESETS: the next or previous preset, shown on HOME */
@@ -668,12 +863,12 @@ static void app_main(void)
                 sl->amt = (int16_t)(nv < -1024 ? -1024 : nv > 1024 ? 1024 : nv);
             }
             apply();
-            hot = k; t_hot = fm1_ms;
+            hot = k; t_hot = fm1_ms; mid_dirty = 1;
             ui_cards(page, hot);
             if (p >= P_KEY && p <= P_SPREAD) last_chord = -1;
             if (p != P_MSLOT) { dirty = 1; t_change = fm1_ms; }
         }
-        if (hot < 4u && fm1_ms - t_hot > 1500u) { hot = 9; ui_cards(page, hot); }
+        if (hot < 4u && fm1_ms - t_hot > 1500u) { hot = 9; ui_cards(page, hot); mid_dirty = 1; }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI: chromatic notes with velocity, and expression */
             uint32_t ty = st & 0xF0u;
@@ -688,17 +883,14 @@ static void app_main(void)
             else if (ty == 0xB0u && d1 == 74u) zm_slide = (int32_t)d2 * 258;
         }
 
-        if (b & (1u << BTN_SAVE)) {             /* SAVE: the scope off and on (to see what the screen costs) */
-            scope_on ^= 1u;
-            if (!scope_on) {
-                cv_begin(240, STRIP, C_BLACK);
-                cv_text((240 - text_w(&FONT_S, "SCOPE OFF   SAVE: ON")) / 2, 24, &FONT_S, "SCOPE OFF   SAVE: ON", ZC_DIM);
-                cv_blit(0, Y_SCOPE);
-                cv_begin(240, H_SCOPE - STRIP, C_BLACK);
-                cv_blit(0, Y_SCOPE + STRIP);
+        if (b & (1u << BTN_SAVE)) { scope_on ^= 1u; mid_dirty = 1; }   /* SAVE: the motion off (a still picture) and on */
+        {                                       /* the middle: 15 times a second while anything moves, else when it changes */
+            static uint32_t was_live;
+            uint32_t live = scope_on && ui_live();
+            if (fm1_ms - t_scope >= 66u && (mid_dirty || live || was_live)) {
+                ui_mid(page, hot); t_scope = fm1_ms; was_live = live;
             }
         }
-        if (scope_on && fm1_ms - t_scope >= 66u) { ui_scope(page, hot); t_scope = fm1_ms; }   /* 15 times a second */
         lit = keys;
         for (k = 0; k < ZV; k++) if (zv[k].stage) voices++;
         for (k = 0; k < 27u; k++)
@@ -726,6 +918,7 @@ static void app_main(void)
                 ui_header(page);
             }
             t_stat = fm1_ms;
+            if (voices != voices_drawn || page == PG_HOME) mid_dirty = 1;   /* the beads; HOME's CPU */
             voices_drawn = voices;
         }
 

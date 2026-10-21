@@ -6,7 +6,7 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: step 3.3 (0.6)
+## Status: step 3 done (0.9)
 
 Six voices of the plugin's two engines into its ladder filter, with its envelopes, modulation, effects and
 look-ahead limiter at -1 dBFS, and 179 of its presets:
@@ -78,10 +78,19 @@ octave, voices.
 
 ### The screen
 
-The mock-ups' frame on every page: the page name with the limiter and CPU along the top; a scope of the output in
-the middle (on HOME under the preset's name), with the chord, the key, or the knob being turned (its full name and
-value) along its foot; four cards along the bottom, one a knob, each with a value and a bar. The scope redraws 15
-times a second from the main loop: it costs the sound nothing but a copy of each block.
+After the mock-ups, in Zenthesizer's theme and its fonts (Instrument Serif Italic, Instrument Sans):
+
+- **HOME**: the tree-ring slab, the preset's name on its band; its family and number along the top. A ring around
+  the bark breathes with the sound (the scope), each note sends a ripple out from the pith, and a bead lights for
+  each voice sounding. CPU sits small in the corner.
+- **The other pages**: the slab dimmed, the sound burned across it; the chord playing in the serif.
+- Along the top a plank with the page's name and the CPU (and the limiter and DROP when they act); along the bottom
+  a plank of four cards, one a knob: name, value, bar. Turning a knob lights its card and spells it out in full.
+- **SAVE** stops the motion (a still picture) and starts it again.
+
+The pictures and fonts are drawn once on a computer (`tools/gen_art.py`) and stored in the firmware (about 80 KB).
+The screen is drawn between audio blocks, from the main loop, and only while something moves or changes; the sound's
+code runs from RAM, out of reach of what the drawing does to the flash cache.
 
 ## Install, test, go back
 

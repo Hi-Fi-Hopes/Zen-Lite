@@ -55,5 +55,5 @@ static const zps_t ZKIT[7] = {
     {8, 11, 307},                               /* mod wheel -> cutoff 30 % */
     {9, 11, 205},                               /* channel pressure -> cutoff 20 % */
 };
-typedef struct { const char *name; uint8_t p[P_N]; zps_t s[ZM_NSLOTS]; } zpreset_t;
+typedef struct { const char *name, *cat; uint8_t p[P_N]; zps_t s[ZM_NSLOTS]; } zpreset_t;
 #endif

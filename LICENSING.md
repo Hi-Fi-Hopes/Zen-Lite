@@ -17,6 +17,7 @@ complete source under the same licence too.
 | What | Licence | Where |
 | --- | --- | --- |
 | Terminus font 8x16 (ter-u16n), rendered into `firmware/gen/felucca_font.h` | SIL OFL 1.1 | `assets/fonts/Terminus-LICENSE.txt` |
+| Instrument Serif and Instrument Sans (from Zenthesizer's Resources), rendered into `firmware/gen/zen_art.h` by `tools/gen_art.py` | SIL OFL 1.1 | `assets/fonts/OFL-InstrumentSerif.txt`, `assets/fonts/OFL-InstrumentSans.txt` |
 | JieLi AC79 SDK: `uboot.boot`, `cfg_tool.bin`, `eq_cfg_hw.bin` are read from your SDK checkout at build time and placed in the package; no SDK files are in this tree | Apache-2.0 | <https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK> |
 
 ## Trademarks
