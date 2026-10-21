@@ -1,0 +1,284 @@
+In file included from firmware/src/zenlite.c:28:
+In file included from firmware/src/zen_voice.h:18:
+firmware/gen/zen_tables.h:886:47: warning: implicit conversion from 'long long' to 'int32_t' (aka 'int') changes value from 2147483648 to -2147483648 [-Wconstant-conversion]
+  2141676973,2143127168,2144578345,2146030505,2147483648,
+                                              ^~~~~~~~~~
+1 warning generated.
+loader: image 8252 B at 0x1c0a800, bss end 0x1c0f420
+loader: ota.bin 6969 B
+  ok    .ram_text: 901 insns, no calls; .fast_text (audio in RAM): 3456 insns
+  ok    image 500400 B of 581564; RAM .data+.bss 30768 B of 98304; pool 313856 B of 344064
+  ok    register access: hal/ only (src/, loader/ clean)
+app      /home/runner/work/Zen-Lite/Zen-Lite/build/zenlite.bin  500400 B
+loader   /home/runner/work/Zen-Lite/Zen-Lite/build/loader/ota.bin  6969 B
+package  /home/runner/work/Zen-Lite/Zen-Lite/build/zenlite-1.1.fwsc  610125 B, identity FM-1_951
+0a025dfece07bff7b1dd38532179b7933632dfdda841268b80b0cdb87b090c2f  build/zenlite.fwsc
+chords: 73920 checked, 0 differ
+== glass (basic: ALEV=0 CUT=79 RES=70 POS=57)
+                Zen-Lite      plugin
+peak dBFS          -20.7       -20.2
+rms dBFS           -34.3       -34.3
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.010       0.011   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 16/16, largest difference 0.4 dB
+== glass_hot (chords: ALEV=0 CUT=127 RES=127 POS=127)
+                Zen-Lite      plugin
+peak dBFS          -10.4        -9.5
+rms dBFS           -25.1       -24.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.333       0.380   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 23/24, largest difference 3.2 dB
+== glass_dark (chords: ALEV=0 CUT=20 RES=127 POS=0)
+                Zen-Lite      plugin
+peak dBFS          -22.9       -26.9
+rms dBFS           -42.2       -42.1
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.000       0.000   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 2/12, largest difference 6.1 dB
+== saw (basic: BLEV=0 WAVE=0 DET=25)
+                Zen-Lite      plugin
+peak dBFS           -6.7        -8.5
+rms dBFS           -25.6       -25.2
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.054       0.046   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 14/15, largest difference 5.3 dB
+== saw_wide (chords: BLEV=0 WAVE=0 DET=127 CUT=127 RES=127)
+                Zen-Lite      plugin
+peak dBFS           -4.7        -4.1
+rms dBFS           -20.4       -19.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.381       0.478   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 23/24, largest difference 3.1 dB
+== square (chords: BLEV=0 WAVE=1 SHAPE=100 CUT=110)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -17.1       -16.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.259       0.295   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 22/24, largest difference 7.6 dB
+== triangle (chords: BLEV=0 WAVE=2 SHAPE=90 CUT=110)
+                Zen-Lite      plugin
+peak dBFS           -3.4        -1.3
+rms dBFS           -17.3       -16.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.151       0.165   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 22/22, largest difference 2.6 dB
+== sine_fm (chords: BLEV=0 WAVE=3 SHAPE=127 TUNE=36 CUT=127)
+                Zen-Lite      plugin
+peak dBFS           -2.7        -1.0
+rms dBFS           -13.5       -12.3
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.211       0.224   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 23/24, largest difference 3.7 dB
+== mix_hot (chords: WAVE=0 CUT=110 RES=90 DET=60)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.7
+rms dBFS           -18.9       -17.8
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.530       0.581   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 21/24, largest difference 7.1 dB
+== envelope (basic: ATT=90 DEC=30 SUS=40 REL=110)
+                Zen-Lite      plugin
+peak dBFS           -9.6        -9.8
+rms dBFS           -25.6       -24.9
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.043       0.061   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 12/16, largest difference 15.2 dB
+== air (chords: ALEV=0 TABLE=0 POS=90 CUT=110)
+                Zen-Lite      plugin
+peak dBFS           -6.5        -4.0
+rms dBFS           -18.5       -18.0
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.112       0.124   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 24/24, largest difference 2.7 dB
+== vox (chords: ALEV=0 TABLE=2 POS=60 CUT=110)
+                Zen-Lite      plugin
+peak dBFS           -7.1        -5.2
+rms dBFS           -20.4       -20.1
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.184       0.185   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 24/24, largest difference 2.8 dB
+== reed (chords: ALEV=0 TABLE=3 POS=100 CUT=110 RES=60)
+                Zen-Lite      plugin
+peak dBFS           -6.4        -6.2
+rms dBFS           -22.2       -22.0
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.268       0.236   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 24/24, largest difference 2.6 dB
+== warp (chords: ALEV=0 TABLE=1 POS=64 WARP=110 CUT=127)
+                Zen-Lite      plugin
+peak dBFS           -8.3        -9.0
+rms dBFS           -21.3       -20.2
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.254       0.254   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 24/24, largest difference 1.9 dB
+== drive (chords: BLEV=0 DRIVE=100 CUT=100 RES=60)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -13.3       -13.2
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.332       0.321   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 21/23, largest difference 5.6 dB
+== drive_b (chords: ALEV=0 DRIVE=127 CUT=90 RES=90)
+                Zen-Lite      plugin
+peak dBFS           -3.7        -3.8
+rms dBFS           -17.8       -17.3
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.149       0.168   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 22/23, largest difference 3.2 dB
+== env_amt (basic: ENVAMT=115 CUT=35 E1A=10 E1D=75 E1S=25 RES=70)
+                Zen-Lite      plugin
+peak dBFS           -7.6        -6.9
+rms dBFS           -28.7       -26.8
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.079       0.065   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 7/18, largest difference 7.4 dB
+== env_neg (chords: ENVAMT=15 CUT=110 E1A=40 E1S=60)
+                Zen-Lite      plugin
+peak dBFS           -3.9        -2.9
+rms dBFS           -19.2       -18.0
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.173       0.221   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 20/24, largest difference 7.7 dB
+== keytrack (chords: KTRACK=127 CUT=60 RES=80)
+                Zen-Lite      plugin
+peak dBFS           -4.9        -1.4
+rms dBFS           -18.5       -16.9
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.061       0.074   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 14/18, largest difference 12.1 dB
+== glide (basic: GLIDE=70)
+                Zen-Lite      plugin
+peak dBFS           -8.7        -8.7
+rms dBFS           -25.9       -24.6
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.050       0.053   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 12/15, largest difference 5.5 dB
+== velocity (basic: VELS=127 VOL=90 WIDTH=127)
+                Zen-Lite      plugin
+peak dBFS          -13.9       -16.1
+rms dBFS           -33.4       -31.9
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.026       0.026   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 13/15, largest difference 6.1 dB
+== lfo_cut (chords: S8=3,11,300 L1RATE=70 RES=80)
+                Zen-Lite      plugin
+peak dBFS           -1.9        -1.0
+rms dBFS           -17.9       -16.9
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.542       0.527   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 20/24, largest difference 8.8 dB
+== vibrato (basic: S8=3,1,25 L1RATE=85)
+                Zen-Lite      plugin
+peak dBFS           -7.0        -8.2
+rms dBFS           -26.1       -24.7
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.053       0.051   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 13/15, largest difference 6.2 dB
+== tremolo (chords: S8=3,14,-600 L1RATE=88 L1SHAPE=1)
+                Zen-Lite      plugin
+peak dBFS           -3.0        -1.0
+rms dBFS           -18.7       -17.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.109       0.125   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 16/20, largest difference 7.6 dB
+== lfo_pan (chords: S8=3,15,900 L1RATE=60 L1SHAPE=3)
+                Zen-Lite      plugin
+peak dBFS           -1.3        -1.0
+rms dBFS           -19.2       -18.1
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.106       0.124   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 17/20, largest difference 7.7 dB
+== env2_pos (chords: ALEV=0 S8=2,6,700 E2A=70 E2D=90 E2S=10)
+                Zen-Lite      plugin
+peak dBFS          -15.0       -12.6
+rms dBFS           -27.3       -26.8
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.017       0.018   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 20/21, largest difference 3.4 dB
+== key_shape (chords: BLEV=0 WAVE=1 S8=14,4,800 S9=7,11,200)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -15.0       -14.4
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.218       0.215   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 22/23, largest difference 4.8 dB
+== plates (chords: PA=110 PB=127 PC=100 PD=90 DTIME=60 DFB=60)
+                Zen-Lite      plugin
+peak dBFS           -3.6        -1.2
+rms dBFS           -18.5       -17.4
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.417       0.525   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 20/24, largest difference 8.1 dB
+== chorus (basic: ALEV=0 CHORUS=100 DEPTH=100)
+                Zen-Lite      plugin
+peak dBFS          -18.2       -17.5
+rms dBFS           -32.8       -32.7
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.009       0.011   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 16/16, largest difference 0.6 dB
+== reverb (basic: ALEV=0 REVERB=90 RDECAY=90 SIZE=100)
+                Zen-Lite      plugin
+peak dBFS          -20.1       -18.4
+rms dBFS           -33.5       -32.6
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.010       0.010   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 14/17, largest difference 15.5 dB
+== shimmer (basic: ALEV=0 REVERB=100 RDECAY=110 SHIMMER=127 SIZE=127)
+                Zen-Lite      plugin
+peak dBFS          -18.1       -17.1
+rms dBFS           -31.8       -31.6
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.012       0.013   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 11/17, largest difference 18.6 dB
+== space_hot (chords: CHORUS=127 REVERB=127 RDECAY=127 SHIMMER=127 CUT=110 RES=90)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -14.8       -13.6
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.411       0.402   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 17/24, largest difference 5.3 dB
+== delay (basic: DELAY=90 DTIME=70 DFB=80 DTONE=80)
+                Zen-Lite      plugin
+peak dBFS           -6.7        -6.8
+rms dBFS           -24.7       -23.3
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.054       0.056   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 12/15, largest difference 7.0 dB
+== delay_dark (chords: DELAY=127 DTIME=40 DFB=127 DTONE=10)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -14.8       -13.6
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.105       0.114   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 16/20, largest difference 9.2 dB
+== delay_lfo (basic: DELAY=40 S8=3,19,500 L1RATE=60)
+                Zen-Lite      plugin
+peak dBFS           -6.7        -7.5
+rms dBFS           -25.9       -24.2
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.056       0.054   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 11/15, largest difference 6.2 dB
+== p_init (chords: PRESET=1)
+                Zen-Lite      plugin
+peak dBFS           -3.9        -2.9
+rms dBFS           -18.7       -18.3
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.124       0.118   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 18/21, largest difference 5.2 dB
+== p_temple (chords: PRESET=2)
+                Zen-Lite      plugin
+peak dBFS           -1.0        -1.0
+rms dBFS           -13.2       -12.8
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.083       0.068   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 14/18, largest difference 5.3 dB
+== p_halo (basic: PRESET=3)
+                Zen-Lite      plugin
+peak dBFS          -10.5        -9.1
+rms dBFS           -25.0       -25.5
+at the rail            0           0   (samples at full scale: must be 0)
+max step           0.043       0.041   (a much bigger step than the plugin's = a click)
+spectrum: bands within 3 dB of the plugin 12/15, largest difference 8.0 dB
+== guard: fades quietly (step 0.056 vs 0.086), silent under load -180 dB, plays after -23 dB
+== presets: 179, level vs the plugin: median -0.5 dB, within 2 dB 174/179, within 3 dB 179/179; at full scale: none
