@@ -46,6 +46,9 @@ Chord notes are the first to give way when all six voices are busy, so a melody 
 
 TONE shapes the headphones and USB audio too: keep it on FLAT when recording.
 
+**The CPU guard**: if the sound ever takes more than 85 % of an audio block, the oldest let-go tail, else the oldest
+chord note, else the oldest note fades out in 4 ms (DROP shows on the screen), so the sound never breaks up.
+
 OCT- / OCT+ the octave, MASTER the volume; USB-MIDI notes in play chromatically, with velocity. Everything is kept
 when the FM-1 is switched off. The screen's last lines: **CPU** (keep it under 50 %), **LIMIT**, octave, voices.
 

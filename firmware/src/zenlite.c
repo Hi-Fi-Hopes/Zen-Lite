@@ -82,13 +82,18 @@ static void apply(void)
 
 /* ---- the sound */
 static int32_t mixL[HALF_FRAMES], mixR[HALF_FRAMES];
-static volatile uint32_t cpu_ticks_max;
+static volatile uint32_t cpu_ticks_max, guard_drops;
+#define GUARD_TICKS (5805u * FM1_TICKS_PER_US * 85u / 100u)   /* over 85 % of a block: shed a voice */
+#ifdef DINGHY_HOST
+static int host_load;                           /* the host tests pretend the FM-1 is overloaded ("T load 1") */
+static void host_set_load(int on) { host_load = on; }
+#endif
 
 static void app_audio(int32_t *out, uint32_t n)
 {
     uint32_t i, v;
 #ifndef DINGHY_HOST
-    uint32_t t0 = fm1_ticks(), dt;
+    uint32_t t0 = fm1_ticks();
 #endif
     for (i = 0; i < n; i++)                     /* (n is always HALF_FRAMES, 256: the effects count on it) */
         mixL[i] = mixR[i] = 0;
@@ -102,10 +107,17 @@ static void app_audio(int32_t *out, uint32_t n)
         out[2u * i] += mixL[i];
         out[2u * i + 1u] += mixR[i];
     }
-#ifndef DINGHY_HOST
-    dt = fm1_ticks() - t0;
-    if (dt > cpu_ticks_max) cpu_ticks_max = dt;
+    {
+        static uint32_t hold;                   /* one voice per 8 blocks (46 ms): a fade takes 4 ms to free the time */
+#ifdef DINGHY_HOST
+        uint32_t dt = host_load ? GUARD_TICKS + 1u : 0u;
+#else
+        uint32_t dt = fm1_ticks() - t0;
 #endif
+        if (dt > cpu_ticks_max) cpu_ticks_max = dt;
+        if (hold) hold--;
+        else if (dt > GUARD_TICKS && zguard_shed()) { guard_drops++; hold = 8u; }
+    }
 }
 
 /* ---- voices: a note gets a tag, and is let go by its tag (a chord and a key may share a note) */
@@ -117,7 +129,8 @@ static uint32_t play(uint32_t note, uint32_t vel, uint32_t chord)
     zvoice_t *z;
     if (note > 127u || !vel) return 0;
     for (v = 0; v < ZV; v++) {                  /* a silent voice, else the quietest let-go one, else the oldest */
-        uint32_t score = !zv[v].gate ? (zv[v].stage ? 1u + ((uint32_t)zv[v].env >> 3) : 0u)
+        uint32_t score = !zv[v].stage && zv[v].seen == zv[v].trig ? 0u       /* idle (also one the guard faded out) */
+                       : !zv[v].gate ? 1u + ((uint32_t)zv[v].env >> 3)
                        : (zv[v].chord ? 0x40000000u : 0x80000000u) + (zv[v].age & 0x3FFFFFFFu);
         if (score < best) { best = score; pick = v; }    /* (chord notes go before melody notes) */
     }
@@ -284,7 +297,7 @@ static void draw_page(uint32_t page)
     for (r = 0; r < 4u; r++) draw_row(page, r, 0);
 }
 
-static void draw_status(uint32_t cpu_pct, int32_t lim_tenths, uint32_t voices)
+static void draw_status(uint32_t cpu_pct, int32_t lim_tenths, uint32_t voices, int dropping)
 {
     char a[40] = "CPU ", b[8], c[32] = "OCT +0   VOICES ";
     uint32_t i = 4, j;
@@ -306,7 +319,8 @@ static void draw_status(uint32_t cpu_pct, int32_t lim_tenths, uint32_t voices)
     c[4] = set.oct < 0 ? '-' : '+';
     c[5] = (char)('0' + (set.oct < 0 ? -set.oct : set.oct));
     c[16] = (char)('0' + voices); c[17] = '/'; c[18] = (char)('0' + ZV); c[19] = 0;
-    draw_text_box(0, 212, 240, &FONT_S, c, ZC_DIM, 1);
+    if (dropping) zcat(c, "  DROP");            /* the guard faded a voice out: the CPU was nearly full */
+    draw_text_box(0, 212, 240, &FONT_S, c, dropping ? ZC_AMBER : ZC_DIM, 1);
 }
 
 static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenths of a dB (0.1 dB = x 0.98855) */
@@ -337,7 +351,7 @@ static void app_main(void)
 
     lcd_fill(0, 0, 240, 240, C_BLACK);
     draw_page(page);
-    draw_status(0, 0, 0);
+    draw_status(0, 0, 0, 0);
 
     for (;;) {
         uint32_t keys, down, up, b, rel, lit, voices = 0, chromatic = set.p[P_KEYS];
@@ -439,7 +453,11 @@ static void app_main(void)
             int32_t g = lim_min_seen;
             cpu_ticks_max = 0;
             lim_min_seen = ONE30;
-            draw_status(cpu, lim_db_tenths(g), voices);
+            {
+                static uint32_t drops_seen, t_drop = 0xFFFF0000u;
+                if (guard_drops != drops_seen) { drops_seen = guard_drops; t_drop = fm1_ms; }
+                draw_status(cpu, lim_db_tenths(g), voices, fm1_ms - t_drop < 2000u);
+            }
             t_stat = fm1_ms;
             voices_drawn = voices;
         }

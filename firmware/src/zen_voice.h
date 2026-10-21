@@ -48,7 +48,8 @@ typedef struct {
     uint32_t seen, ph, pa[3];
     int32_t fb[3];                              /* the sine's self-FM memory, Q15 */
     volatile int32_t env;                       /* Q30; the main loop reads it to steal voices */
-    volatile uint8_t stage;                     /* 0 idle, 1 attack, 2 decay/sustain, 3 release */
+    volatile uint8_t stage;                     /* 0 idle, 1 attack, 2 decay/sustain, 3 release, 4 fading out (the guard) */
+    uint8_t kill;                               /* the CPU guard wants this voice gone: a 4 ms fade */
     int32_t s[4];                               /* ladder states, Q24 */
 } zvoice_t;
 
@@ -73,7 +74,7 @@ static inline __attribute__((always_inline)) int32_t ztanh(int32_t x)           
     u = (uint32_t)(x + (4 << 24));
     i = u >> 17;
     f = u & 0x1FFFFu;
-    return ZT_TANH[i] + (int32_t)(((int64_t)(ZT_TANH[i + 1] - ZT_TANH[i]) * (int32_t)f) >> 17);
+    return ZT_TANH[i] + (((ZT_TANH[i + 1] - ZT_TANH[i]) * (int32_t)(f >> 5)) >> 12);   /* 32-bit: |step| < 2^18 */
 }
 
 static inline __attribute__((always_inline)) int32_t zsin(uint32_t ph)                /* a full cycle over 2^32 -> Q15 */
@@ -189,6 +190,25 @@ static void limiter(int32_t *L, int32_t *R, uint32_t n)
     }
 }
 
+#define ZKILL 27638143                          /* the guard's fade: -40 dB in 4 ms, Q30 */
+
+/* ---- the CPU guard: when a block took too long, fade one voice out (a let-go tail first, the quietest; then the
+ * oldest chord note; then the oldest note). Returns 1 if it found one. Runs in the audio interrupt. */
+static uint32_t zguard_shed(void)
+{
+    uint32_t v, pick = ZV, best = 0xFFFFFFFFu;
+    for (v = 0; v < ZV; v++) {
+        uint32_t score;
+        if (!zv[v].stage || zv[v].kill) continue;
+        score = zv[v].stage == 3 ? (uint32_t)zv[v].env >> 3
+              : (zv[v].chord ? 0x40000000u : 0x80000000u) + (zv[v].age & 0x3FFFFFFFu);
+        if (score < best) { best = score; pick = v; }
+    }
+    if (pick == ZV) return 0;
+    zv[pick].kill = 1;
+    return 1;
+}
+
 /* ---- one voice, n frames (n a multiple of ZBLK), added into mixL / mixR (Q15) */
 static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
 {
@@ -208,9 +228,12 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
             env = 0;
         }
         stage = 1;
-    } else if (!v->gate && (stage == 1 || stage == 2))
+        v->kill = 0;
+    } else if (v->kill && stage)
+        stage = 4;
+    else if (!v->gate && (stage == 1 || stage == 2))
         stage = 3;
-    if (!stage) { v->env = 0; return; }
+    if (!stage) { v->env = 0; v->kill = 0; return; }
 
     ph = v->ph; pa0 = v->pa[0]; pa1 = v->pa[1]; pa2 = v->pa[2];
     fb0 = v->fb[0]; fb1 = v->fb[1]; fb2 = v->fb[2];
@@ -307,15 +330,15 @@ static void zv_render(uint32_t vi, int32_t *mixL, int32_t *mixR, uint32_t n)
             } else if (stage == 2)
                 env += M30(zc_sus - env, zc_dec);
             else {
-                env += M30(-env, zc_rel) - 1;
+                env += M30(-env, stage == 4 ? ZKILL : zc_rel) - 1;
                 if (env < 107374) { env = 0; stage = 0; }           /* 1e-4 */
             }
 
-            /* x2 driveComp x 0.5 headroom = 1; Q24 x Q30 -> Q15, then velocity and the voice's place */
-            o = (int32_t)(((int64_t)y * env) >> 39);
-            o = (int32_t)(((int64_t)o * vel) >> 15);
-            mixL[i] += (int32_t)(((int64_t)o * pl) >> 14);
-            mixR[i] += (int32_t)(((int64_t)o * pr) >> 14);
+            /* x2 driveComp x 0.5 headroom = 1: the envelope, velocity and the voice's place make two gains (Q15),
+             * then Q24 x Q15 -> Q15 */
+            o = ((env >> 15) * vel) >> 15;
+            mixL[i] += (int32_t)(((int64_t)y * ((o * pl) >> 14)) >> 24);
+            mixR[i] += (int32_t)(((int64_t)y * ((o * pr) >> 14)) >> 24);
         }
         if (!stage) break;
     }

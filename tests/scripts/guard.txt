@@ -1,0 +1,9 @@
+# the CPU guard: a held chord, then pretend overload for 300 ms
+100 keys 0x2492481
+1500 load 1
+1550 shot
+1800 load 0
+2500 keys 0
+2600 keys 0x80
+3500 keys 0
+5000 end
