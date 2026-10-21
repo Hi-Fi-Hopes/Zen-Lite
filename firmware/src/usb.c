@@ -161,6 +161,14 @@ static volatile uint32_t so_w, so_r;
 #define MQ 64u
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
+static int midi_enqueue(uint32_t pkt)               /* TIMER5 ISR: the TRS jack's messages (midi_uart.c) */
+{
+    if (mi_w - mi_r >= MQ) return 0;
+    midi_in_q[mi_w % MQ] = pkt;
+    RING_PUBLISH();
+    mi_w++;
+    return 1;
+}
 static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 {
     if (usb.config && mo_w - mo_r < MQ) {

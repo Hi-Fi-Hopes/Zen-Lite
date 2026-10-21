@@ -9,6 +9,7 @@ complete source under the same licence too.
 | | |
 | --- | --- |
 | The platform: `firmware/hal/`, `firmware/loader/`, `crt0.S`, `app.ld`, `firmware/src/` (`usb.c`, `ota.c`, `recovery.c`, `lcd.c`, `gfx.c`, `libc.c`, `bootguard.h`, `uac_fir.h`), `tools/` | Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments ([Felucca](https://github.com/hugelton/Felucca)), with the changes of [SLOOP](https://github.com/isod89/sloop-fm1) (isod89) |
+| `firmware/src/midi_uart.c` (MIDI IN on the TRS jack), from [Melodee](https://github.com/keremimo/melodee)'s, adapted | Copyright (C) 2026 Kerem Kilic (Ellic Studio), portions Leo Kuroshita |
 | The wiring `platform.c`, the host mode `tests/host.c`, `tests/run_host.sh`, `docs/API.md`, `docs/RULES.md` ([Dinghy](https://github.com/zvenson/dinghy)) | zvenson |
 | Zen-Lite: `firmware/src/zenlite.c`, `zen_voice.h`, `zen_mod.h`, `zen_fx.h`, `zen_chords.h`, `zen_params.h`, `tools/gen_tables.py`, `tools/zen_presets.cpp`, `tools/make_presets.sh` and the files they write, `tests/ref/`, `tests/scripts/`, `tests/compare.py`, `tests/check_audio.sh`; the sound (wavetables, ladder, envelopes, modulation, effects, limiter) and the factory presets are ported from [Zenthesizer](https://github.com/Hi-Fi-Hopes/Zenthesizer) | Hi-Fi Hopes |
 

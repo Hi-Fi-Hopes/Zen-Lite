@@ -1,0 +1,21 @@
+# Launchkey on the TRS jack (here as MIDI in): pad I, then 7TH held + pad IV; knob 1 (CC 21) to BLOOM
+300 midi 0x99 36 100
+900 shot
+1000 midi 0x89 36 0
+1200 midi 0x99 44 100
+1300 midi 0x99 39 100
+1700 shot
+1900 midi 0x89 39 0
+1950 midi 0x89 44 0
+2200 midi 0xB0 21 100
+2300 shot
+# the CONTROLLER page: learn the pads, press two
+2500 btn 7
+2550 btn 7
+2700 enc 2 1
+2800 shot
+2900 midi 0x92 60 90
+3000 midi 0x82 60 0
+3100 midi 0x92 62 90
+3200 shot
+3300 end

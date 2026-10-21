@@ -6,7 +6,7 @@ FM-1 keeps its updater, its USB rescue and its way back to the official firmware
 
 ![Zen-Lite's screen](docs/screen.png)
 
-## Status: 1.0
+## Status: 1.1
 
 Six voices of the plugin's two engines into its ladder filter, with its envelopes, modulation, effects and
 look-ahead limiter at -1 dBFS, and 179 of its presets:
@@ -67,6 +67,21 @@ A second press of a button steps to its next page.
 | ARP | ARP | MODE: OFF, UP, DOWN, UP-DOWN, RANDOM, AS PLAYED | RATE: 1/4 .. 1/32 (with triplets) | OCTAVES 1-4 | GATE |
 | | TEMPO | BPM | HOLD | SYNC: INTERNAL, MIDI CLOCK | CLEAR (the sequence: four clicks right) |
 | SEQ | SEQUENCER | STEP (the one REC writes next) | LENGTH 1-16 | RATE | GATE |
+| GLO again | CONTROLLER | PADS (learn) | KNOBS (learn) | PAD CH (any, 1-16) | RESET (four clicks right) |
+
+### A MIDI controller (a Launchkey Mini MK4, say)
+
+MIDI comes in over USB **and the 3.5 mm TRS MIDI IN jack** (the TRS driver is Melodee's). A controller's pads play the
+chord keys and its knobs set eight settings; set up for a Novation Launchkey in standalone mode out of the box:
+
+- **Pads** (channel 10, from note 36): the seven chords I .. vii, then 7TH, 9TH, SUS and STRUM, held as the black keys
+  8-11 are (the FM-1's own modifier keys work with the pads too).
+- **Knobs** (CC 21-28): BLOOM, MORPH, ECHOES, SPACE, CUTOFF, RESONANCE, DELAY MIX, REVERB MIX.
+- Another controller, or another layout: GLO twice, then **PADS** (turn right): press the pads for I, ii, iii, IV, V,
+  vi, vii, 7TH, 9TH, SUS, STRUM in turn (the first sets the channel); **KNOBS**: turn the eight knobs in turn.
+  **RESET** brings the Launchkey's back. Everything else from the controller (its keys, pitch and mod strips,
+  pressure) plays as any MIDI does.
+- A Type A TRS cable (a plain 3.5 mm stereo cable between two Type A jacks): the Launchkey Mini MK4 is Type A.
 
 ### The arpeggiator and the sequencer
 

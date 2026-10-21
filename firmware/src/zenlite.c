@@ -35,10 +35,12 @@
 #endif
 
 /* ---- the pages: four knobs each (zen_params.h); the MOD page edits the slots, not a parameter */
-enum { P_MSLOT = P_N, P_MSRC, P_MDST, P_MAMT, P_SSTEP, P_SCLEAR, P_NONE = 255 };   /* knobs that are not parameters */
-#define NPAGES 18u
+enum { P_MSLOT = P_N, P_MSRC, P_MDST, P_MAMT, P_SSTEP, P_SCLEAR, P_LPADS, P_LKNOBS, P_PADCH, P_CRESET,
+       P_NONE = 255 };                          /* knobs that are not parameters */
+#define NPAGES 19u
 static const char *const PAGE_NAME[NPAGES] = {"HOME", "FILTER", "ENGINE A", "ENGINE B", "VOICE", "AMP ENV", "ENV 1",
-    "ENV 2", "LFO", "RANDOM + KEY", "MOD", "FX", "SPACE", "DELAY", "KEY + SCALE", "ARP", "TEMPO", "SEQUENCER"};
+    "ENV 2", "LFO", "RANDOM + KEY", "MOD", "FX", "SPACE", "DELAY", "KEY + SCALE", "ARP", "TEMPO", "SEQUENCER",
+    "CONTROLLER"};
 #define PG_HOME 0u
 #define PG_EDIT 1u                              /* 1-4 */
 #define PG_ENV 5u                               /* 5-7 */
@@ -48,10 +50,11 @@ static const char *const PAGE_NAME[NPAGES] = {"HOME", "FILTER", "ENGINE A", "ENG
 #define PG_GLO 14u
 #define PG_ARP 15u                              /* 15-16 */
 #define PG_SEQ 17u
+#define PG_CTL 18u
 static uint32_t page_param(uint32_t page, uint32_t r)
 {
-    static const uint8_t EXTRA[3][4] = {{P_ARPMODE, P_ARPRATE, P_ARPOCT, P_ARPGATE}, {P_BPM, P_HOLD, P_SYNC, P_SCLEAR},
-                                        {P_SSTEP, P_SLEN, P_SRATE, P_SGATE}};
+    static const uint8_t EXTRA[4][4] = {{P_ARPMODE, P_ARPRATE, P_ARPOCT, P_ARPGATE}, {P_BPM, P_HOLD, P_SYNC, P_SCLEAR},
+                                        {P_SSTEP, P_SLEN, P_SRATE, P_SGATE}, {P_LPADS, P_LKNOBS, P_PADCH, P_CRESET}};
     if (page < PG_MOD) return page * 4u + r;
     if (page == PG_MOD) return P_MSLOT + r;
     if (page >= PG_ARP) return EXTRA[page - PG_ARP][r];
@@ -64,13 +67,17 @@ static const char *const DST_NAME[ZD_N] = {"--", "PITCH", "A TUNE", "A DETUNE", 
     "CHORUS", "DELAY", "REVERB"};
 #define DST_SKIP(d) ((d) == ZD_BUNISON || (d) == ZD_AIR)   /* the plugin's, without an engine here */
 
-#define SET_VER 6u
+#define SET_VER 7u
 #define SEQ_N 16u                               /* steps */
 #define SEQ_V 6u                                /* notes a step (a chord) */
 typedef struct {
     uint8_t ver; int8_t oct; uint16_t preset; uint8_t p[P_N]; zps_t slot[ZM_NSLOTS];
     uint8_t seq[SEQ_N][SEQ_V];                  /* the sequence: MIDI notes, 0 = none */
+    /* (1.1) a MIDI controller: the notes of its pads for chords I..vii, 7TH, 9TH, SUS, STRUM; its pads' channel
+     * (0 any); the CCs of its 8 knobs */
+    uint8_t ctl_pad[11], ctl_ch, ctl_cc[8];
 } set_t;
+#define SET_V6_SIZE ((uint32_t)(uintptr_t)&((set_t *)0)->ctl_pad)   /* 1.0's settings: everything before ctl_pad */
 static set_t set;
 static uint32_t mod_sel = 7;                    /* the MOD page's slot (0-11): the first after the plate kit */
 
@@ -518,6 +525,7 @@ static void percent(char *s, int32_t q)         /* Q10 -> "+35%", or "+0.6%" und
     zcat(s, "%");
 }
 
+static uint32_t ctl_learn, ctl_step, ctl_reset_count, ctl_reset_t, ctl_dirty;   /* (the controller: see ctl_midi) */
 /* the sequencer's editing state (the main loop's): the step being written, a step's notes as they are played, CLEAR */
 static uint32_t rec_on, rec_cur, rec_n, clr_count, clr_t;
 static uint8_t rec_buf[SEQ_V];
@@ -580,6 +588,10 @@ static void value_text(uint32_t p, char *s)
     case P_SYNC: zcat(s, v ? "MIDI CLOCK" : "INTERNAL"); break;
     case P_SSTEP: num(s, (int32_t)rec_cur + 1); break;
     case P_SCLEAR: zcat(s, fm1_ms - clr_t < 1500u ? "CLEARED" : clr_count ? "MORE" : "TURN >"); break;
+    case P_LPADS: zcat(s, ctl_learn == 1u ? "LEARNING" : "LEARN >"); break;
+    case P_LKNOBS: zcat(s, ctl_learn == 2u ? "LEARNING" : "LEARN >"); break;
+    case P_PADCH: if (set.ctl_ch) num(s, set.ctl_ch); else zcat(s, "ANY"); break;
+    case P_CRESET: zcat(s, fm1_ms - ctl_reset_t < 1500u ? "DONE" : ctl_reset_count ? "MORE" : "TURN >"); break;
     default: num(s, (int32_t)v);
     }
 }
@@ -613,7 +625,8 @@ static const char *const SHORT[P_N] = {"BLOOM", "MORPH", "ECHOES", "SPACE", "CUT
     "RANDOM", "SMOOTH", "KEYTRK", "STEREO", "CHORUS", "REVERB", "DECAY", "SHIMMER", "SIZE", "DAMP", "DEPTH", "SPEAKER",
     "TIME", "FEEDBK", "TONE", "MIX", "KEY", "SCALE", "KEYS", "SPREAD", "MODE", "RATE", "OCTAVES", "GATE",
     "BPM", "HOLD", "SYNC", "LENGTH", "RATE", "GATE"};
-static const char *const PSEUDO[6] = {"SLOT", "SOURCE", "DEST", "AMOUNT", "STEP", "CLEAR"};   /* P_MSLOT .. P_SCLEAR */
+static const char *const PSEUDO[10] = {"SLOT", "SOURCE", "DEST", "AMOUNT", "STEP", "CLEAR", "PADS", "KNOBS",
+                                       "PAD CH", "RESET"};   /* P_MSLOT .. P_CRESET */
 static const char *const SRC_SHORT[ZS_N] = {"--", "ENV 1", "ENV 2", "LFO 1", "LFO 2", "RANDOM", "PRESS", "VEL",
     "WHEEL", "CH PRS", "BLOOM", "MORPH", "ECHOES", "SPACE", "KEY", "SLIDE"};
 static const char *const DST_SHORT[ZD_N] = {"--", "PITCH", "A TUNE", "A DET", "A SHAPE", "A LEVEL", "B POS",
@@ -662,6 +675,10 @@ static uint32_t bar_of(uint32_t p)              /* a card's bar, 0..1024 */
     if (p == P_MDST) return sl->dst * 1024u / (ZD_N - 1u);
     if (p == P_SSTEP) return rec_cur * 1024u / (SEQ_N - 1u);
     if (p == P_SCLEAR) return clr_count * 256u;
+    if (p == P_LPADS) return ctl_learn == 1u ? ctl_step * 1024u / 11u : 0u;
+    if (p == P_LKNOBS) return ctl_learn == 2u ? ctl_step * 128u : 0u;
+    if (p == P_PADCH) return set.ctl_ch * 64u;
+    if (p == P_CRESET) return ctl_reset_count * 256u;
     a = sl->amt < 0 ? -sl->amt : sl->amt;
     return (uint32_t)a;
 }
@@ -914,26 +931,40 @@ static void ui_mid(uint32_t page, uint32_t hot)
     uint32_t foot_c;
     const felucca_font_t *nf = &ZF_NAME, *tf = &ZF_TXT;
     const char *nm = ZPRESET[set.preset % ZPRESETS].name;
-    int32_t foot_y, i;
+    int32_t foot_y, i, chord_foot;
     if (scope_on) sc_points(ys, page == PG_HOME ? 9 : 52);
     else for (x = 0; x < SC_PTS; x++) ys[x] = 0;
     for (k = 0; k < 4u; k++)                    /* ripples: 0.9 s from the pith to the bark */
         if (ripple[k].on && fm1_ms - ripple[k].t0 > 900u) ripple[k].on = 0;
 
     s[0] = 0;                                   /* the foot: the knob being turned, else the chord, else the key */
+    if (page == PG_CTL && ctl_learn) hot = 9;   /* (learning: its prompt comes first) */
+    chord_foot = 0;
     if (hot < 4u) {
         uint32_t p = page_param(page, hot);
         char v[24];
         zcat(s, p < P_N ? PARAM[p].name : PSEUDO[p - P_MSLOT]);
         zcat(s, "   "); value_text(p, v); zcat(s, v);
         foot_c = T_BRASSHI;
+    } else if (page == PG_CTL) {
+        static const char *const KN[8] = {"BLOOM", "MORPH", "ECHOES", "SPACE", "CUTOFF", "RESONANCE", "DELAY", "REVERB"};
+        static const char *const PN[11] = {"I", "ii", "iii", "IV", "V", "vi", "vii", "7TH", "9TH", "SUS", "STRUM"};
+        char t[8];
+        if (ctl_learn == 1u) { zcat(s, "press the pad for  "); zcat(s, PN[ctl_step]); foot_c = T_AMBER; }
+        else if (ctl_learn == 2u) { zcat(s, "turn the knob for  "); zcat(s, KN[ctl_step]); foot_c = T_AMBER; }
+        else {
+            zcat(s, "pads ch "); if (set.ctl_ch) { num(t, set.ctl_ch); zcat(s, t); } else zcat(s, "any");
+            zcat(s, " from note "); num(t, set.ctl_pad[0]); zcat(s, t);
+            zcat(s, "   knobs CC "); num(t, set.ctl_cc[0]); zcat(s, t); zcat(s, "+");
+            foot_c = T_STEEL;
+        }
     } else if (page == PG_SEQ) {
         char t[8];
         if (rec_on) { zcat(s, "REC  step "); num(t, (int32_t)rec_cur + 1); zcat(s, t); zcat(s, ":  play it, or SEQ for a rest"); foot_c = 0xFF5A3Cu; }
         else if (seq_on) { zcat(s, "playing   PLAY stops"); foot_c = T_AMBER; }
         else { zcat(s, "PLAY plays   REC writes"); foot_c = T_STEEL; }
     } else if (set.p[P_KEYS]) { zcat(s, "chromatic keys"); foot_c = T_STEEL; }
-    else if (last_chord >= 0) { zcat(s, chord_text); foot_c = T_AMBER; }
+    else if (last_chord >= 0) { zcat(s, chord_text); foot_c = T_AMBER; chord_foot = 1; }
     else {
         zcat(s, znote_name(set.p[P_KEY], zkey_flats(set.p[P_KEY], set.p[P_SCALE])));
         zcat(s, " "); zcat(s, ZSCALES[set.p[P_SCALE]].name);
@@ -1020,7 +1051,7 @@ static void ui_mid(uint32_t page, uint32_t hot)
                 zb_line((int32_t)x - 1, 78 - ys[x - 1], (int32_t)x, 78 - ys[x], T_GLOW, 230);
             }
         }
-        if (last_chord >= 0 && hot >= 4u && !set.p[P_KEYS] && page != PG_HOME && page != PG_SEQ)
+        if (chord_foot && page != PG_HOME)
             zb_textc(120, foot_y - 6, nf, s, foot_c, 0);   /* a chord: in the serif */
         else
             zb_textc(120, foot_y, tf, s, foot_c, 0);
@@ -1051,6 +1082,62 @@ static int32_t lim_db_tenths(int32_t g)        /* gain Q30 -> reduction in tenth
     return t;
 }
 
+/* ---- a MIDI controller (USB or the TRS jack): its pads play the chord keys and hold the modifiers, its knobs set
+ * eight settings. The defaults are Novation's (Launchkey: pads on channel 10 from note 36, knobs CC 21-28); LEARN
+ * takes any other controller's, or another layout. */
+static const uint8_t CTL_KNOB_P[8] = {P_PA, P_PB, P_PC, P_PD, P_CUT, P_RES, P_DELAY, P_REVERB};
+static uint8_t ctl_mod[4];                      /* the controller's held modifiers: 7TH 9TH SUS STRUM */
+static int8_t ctl_chord_down[7];
+static void ctl_defaults(void)
+{
+    static const uint8_t PADS[11] = {36, 37, 38, 39, 40, 41, 42, 44, 45, 46, 47};
+    uint32_t k;
+    for (k = 0; k < 11u; k++) set.ctl_pad[k] = PADS[k];
+    for (k = 0; k < 8u; k++) set.ctl_cc[k] = (uint8_t)(21u + k);
+    set.ctl_ch = 10;
+}
+/* one MIDI message: 1 if the controller layer took it (a pad, a knob, or learning) */
+static int ctl_midi(uint8_t st, uint8_t d1, uint8_t d2, int m7, int m9, int sus, int strum)
+{
+    uint32_t ty = st & 0xF0u, ch = (st & 15u) + 1u, k;
+    int on = ty == 0x90u && d2, off = ty == 0x80u || (ty == 0x90u && !d2);
+    if (ctl_learn == 1u && on) {                /* learning the pads: this one is the next */
+        set.ctl_pad[ctl_step] = d1;
+        if (!ctl_step) set.ctl_ch = (uint8_t)ch;
+        if (++ctl_step == 11u) ctl_learn = 0;
+        ctl_dirty = 1;
+        return 1;
+    }
+    if (ctl_learn == 1u && off) return 1;
+    if (ctl_learn == 2u && ty == 0xB0u) {       /* learning the knobs */
+        if (ctl_step && set.ctl_cc[ctl_step - 1u] == d1) return 1;   /* still the last one turning */
+        set.ctl_cc[ctl_step] = d1;
+        if (++ctl_step == 8u) ctl_learn = 0;
+        ctl_dirty = 1;
+        return 1;
+    }
+    if ((on || off) && (!set.ctl_ch || set.ctl_ch == ch))
+        for (k = 0; k < 11u; k++)
+            if (set.ctl_pad[k] == d1) {
+                if (k < 7u) {                   /* a chord, with the keyboard's and the pads' modifiers */
+                    if (on) { chord_down(k, m7 || ctl_mod[0], m9 || ctl_mod[1], sus || ctl_mod[2], strum || ctl_mod[3]);
+                              ctl_chord_down[k] = 1; mid_dirty = 1; }
+                    else if (ctl_chord_down[k]) { chord_up(k); ctl_chord_down[k] = 0; }
+                } else ctl_mod[k - 7u] = (uint8_t)on;
+                return 1;
+            }
+    if (ty == 0xB0u)                            /* a knob: the setting it is mapped to, across its range */
+        for (k = 0; k < 8u; k++)
+            if (set.ctl_cc[k] == d1) {
+                uint32_t p = CTL_KNOB_P[k];
+                set.p[p] = (uint8_t)(PARAM[p].lo + (d2 * (uint32_t)(PARAM[p].hi - PARAM[p].lo) + 63u) / 127u);
+                apply();
+                ctl_dirty = 2;
+                return 1;
+            }
+    return 0;
+}
+
 /* ---- the main loop */
 static void app_main(void)
 {
@@ -1059,13 +1146,18 @@ static void app_main(void)
     int8_t key_chord[27];
     for (k = 0; k < P_N; k++) set.p[k] = PARAM[k].def;
     load_preset(0);
+    ctl_defaults();
 #ifdef ZL_SET                                   /* the host tests set their own: -DZL_SET='set.p[P_CUT]=100;...' */
     ZL_SET;
 #else
-    if (settings_load(&set, sizeof set) || set.ver != SET_VER) {   /* nothing saved (or from an older Zen-Lite) */
-        for (k = 0; k < P_N; k++) set.p[k] = PARAM[k].def;
-        set.oct = 0;
-        load_preset(0);
+    if (settings_load(&set, sizeof set) || set.ver != SET_VER) {   /* nothing saved, or 1.0's (kept), or older */
+        ctl_defaults();
+        if (settings_load(&set, SET_V6_SIZE) || set.ver != 6u) {
+            for (k = 0; k < P_N; k++) set.p[k] = PARAM[k].def;
+            set.oct = 0;
+            load_preset(0);
+            ctl_defaults();
+        }
     }
 #endif
     set.ver = SET_VER;
@@ -1135,10 +1227,10 @@ static void app_main(void)
                         : b & (1u << BTN_ENV) ? (page >= PG_ENV && page < PG_ENV + 2u ? page + 1u : PG_ENV)
                         : b & (1u << BTN_LFO) ? (page >= PG_LFO && page < PG_LFO + 2u ? page + 1u : PG_LFO)
                         : b & (1u << BTN_FX) ? (page >= PG_FX && page < PG_FX + 2u ? page + 1u : PG_FX)
-                        : b & (1u << BTN_GLO) ? PG_GLO
+                        : b & (1u << BTN_GLO) ? (page == PG_GLO ? PG_CTL : PG_GLO)
                         : b & (1u << BTN_ARP) ? (page == PG_ARP ? PG_ARP + 1u : PG_ARP)
                         : b & (1u << BTN_SEQ) && !rec_on ? PG_SEQ : page;
-            if (np != page) { page = np; hot = 9; draw_page(page); }
+            if (np != page) { page = np; hot = 9; if (page != PG_CTL) ctl_learn = 0; draw_page(page); }
         }
         if (b & (1u << BTN_SEQ) && rec_on) {    /* recording: SEQ writes a rest */
             memset(set.seq[rec_cur], 0, SEQ_V);
@@ -1197,6 +1289,14 @@ static void app_main(void)
             } else if (p == P_SSTEP) {          /* the step the sequencer writes next */
                 nv = (int32_t)rec_cur + d;
                 rec_cur = (uint32_t)(nv < 0 ? 0 : nv >= (int32_t)set.p[P_SLEN] ? (int32_t)set.p[P_SLEN] - 1 : nv);
+            } else if (p == P_LPADS || p == P_LKNOBS) {   /* LEARN: right starts it, left stops it */
+                if (d > 0) { ctl_learn = p == P_LPADS ? 1u : 2u; ctl_step = 0; } else ctl_learn = 0;
+            } else if (p == P_PADCH) {
+                nv = (int32_t)set.ctl_ch + d;
+                set.ctl_ch = (uint8_t)(nv < 0 ? 0 : nv > 16 ? 16 : nv);
+            } else if (p == P_CRESET) {         /* RESET: four clicks right, the Launchkey's defaults again */
+                if (d < 0) ctl_reset_count = 0;
+                else if ((ctl_reset_count += (uint32_t)d) >= 4u) { ctl_defaults(); ctl_reset_count = 0; ctl_reset_t = fm1_ms; ctl_learn = 0; }
             } else if (p == P_SCLEAR) {         /* CLEAR: four clicks to the right empty the sequence */
                 if (d < 0) clr_count = 0;
                 else if ((clr_count += (uint32_t)d) >= 4u) {
@@ -1216,8 +1316,9 @@ static void app_main(void)
         }
         if (hot < 4u && fm1_ms - t_hot > 1500u) { hot = 9; ui_cards(page, hot); mid_dirty = 1; }
 
-        while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI: chromatic notes with velocity, and expression */
+        while (midi_get(&st, &d1, &d2)) {       /* MIDI (USB and the TRS jack): notes with velocity, expression */
             uint32_t ty = st & 0xF0u;
+            if (ctl_midi(st, d1, d2, m7, m9, sus, strum)) continue;   /* the controller's pads and knobs */
             if (ty == 0x90u && d2) { release_tag(midi_tag[d1 & 127u]); midi_tag[d1 & 127u] = play(d1, d2, 0); }
             else if (ty == 0x80u || ty == 0x90u) { release_tag(midi_tag[d1 & 127u]); midi_tag[d1 & 127u] = 0; }
             else if (ty == 0xA0u) {             /* poly pressure: that note's PRESSURE */
@@ -1235,6 +1336,13 @@ static void app_main(void)
             else if (ty == 0xB0u && d1 == 74u) zm_slide = (int32_t)d2 * 258;
         }
 
+        if (ctl_dirty) {                        /* the controller turned a knob, or a learn moved on */
+            static uint32_t t_ctl;
+            if (fm1_ms - t_ctl >= 40u) {        /* (redrawn at most 25 times a second, however fast it turns) */
+                ui_cards(page, hot); mid_dirty = 1;
+                dirty = 1; t_change = fm1_ms; ctl_dirty = 0; t_ctl = fm1_ms;
+            }
+        }
         if (b & (1u << BTN_SAVE)) { scope_on ^= 1u; mid_dirty = 1; }   /* SAVE: the motion off (a still picture) and on */
         {                                       /* the middle: 15 times a second while anything moves, else when it changes */
             static uint32_t was_live;
@@ -1254,7 +1362,7 @@ static void app_main(void)
         fm1_led_key(BTN_ENV, page >= PG_ENV && page < PG_LFO);
         fm1_led_key(BTN_LFO, page >= PG_LFO && page < PG_FX);
         fm1_led_key(BTN_FX, page >= PG_FX && page < PG_GLO);
-        fm1_led_key(BTN_GLO, page == PG_GLO);
+        fm1_led_key(BTN_GLO, page == PG_GLO || page == PG_CTL);
         fm1_led_key(BTN_SEL, set.p[P_KEYS] != 0u);
         fm1_led_key(BTN_SAVE, !scope_on);
         fm1_led_key(BTN_ARP, set.p[P_ARPMODE] != 0u);
