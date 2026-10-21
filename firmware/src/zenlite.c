@@ -123,7 +123,7 @@ static int host_load;                           /* the host tests pretend the FM
 static void host_set_load(int on) { host_load = on; }
 #endif
 
-ZFAST static void app_audio(int32_t *out, uint32_t n)
+ZFAST static void zl_audio(int32_t *out, uint32_t n)   /* the sound, in RAM (app_audio below calls it) */
 {
     uint32_t i, v;
     int32_t vol = zl_vol;
@@ -165,6 +165,11 @@ ZFAST static void app_audio(int32_t *out, uint32_t n)
         else if (dt > GUARD_TICKS && zguard_shed()) { guard_drops++; hold = 8u; }
     }
 }
+
+/* the platform's audio interrupt (in the flash) calls this; a direct call cannot reach the RAM code (the jump's range
+ * is too short), a call through a pointer can */
+static void (*volatile zl_audio_fn)(int32_t *, uint32_t) = zl_audio;
+static void app_audio(int32_t *out, uint32_t n) { zl_audio_fn(out, n); }
 
 /* ---- voices: a note gets a tag, and is let go by its tag (a chord and a key may share a note) */
 static uint32_t ages, tags, last_started = 60;
